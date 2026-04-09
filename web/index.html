@@ -495,6 +495,7 @@ async function loadContinueWatching() {
           <h4>${e.series_title} — E${e.episodeNumber}</h4>
           <p>${e.title}</p>
           <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+          <span style="font-size:0.75rem;color:#94a3b8;margin-top:5px;display:block;">${d > 0 ? (formatTime(Math.max(0, d - e.progress_seconds)) + ' left') : ''}</span>
         </div>`;
       card.onclick = () => playEpisode(e);
       row.appendChild(card);
@@ -642,6 +643,10 @@ async function loadEpisodes(season) {
     const episodes = await window.DB.getEpisodesBySeasonId(season.id, userId);
     row.innerHTML = '';
 
+    // Remove any existing
+    const existing = row.parentElement.querySelector('.auto-sort-bar');
+    if (existing) existing.remove();
+
     // Auto-sort bar for season 0
     if (season.seasonNumber === 0) {
       const bar = document.createElement('div');
@@ -654,9 +659,6 @@ async function loadEpisodes(season) {
         <button class="btn btn-primary focusable" id="auto-sort-btn" tabindex="0">✨ Auto-Sort</button>`;
       row.parentElement.insertBefore(bar, row);
       document.getElementById('auto-sort-btn').onclick = doAutoSort;
-    } else {
-      const existing = row.parentElement.querySelector('.auto-sort-bar');
-      if (existing) existing.remove();
     }
 
     episodes.forEach(e => {
@@ -676,7 +678,8 @@ async function loadEpisodes(season) {
       const manualBadge  = e.is_manual  ? `<span class="manual-badge">Manual ✏️</span>` : '';
       const isSeason0    = season.seasonNumber === 0;
       const assignBtn    = (isSeason0 && !e.is_manual)
-        ? `<button onclick="event.stopPropagation();promptAssign(${e.id})" class="btn btn-primary focusable" tabindex="0" style="padding:6px 14px;font-size:0.8rem;">Assign ✏️</button>`
+        ? `<button onclick="event.stopPropagation();promptAssign(${e.id})" class="btn btn-primary focusable" tabindex="0" style="padding:6px 14px;font-size:0.8rem;">Assign ✏️</button>
+           <button onclick="event.stopPropagation();doAutoSortSingle(${e.id})" class="btn focusable" tabindex="0" style="padding:6px 14px;font-size:0.8rem;background:#3b82f6;color:#ffffff;border:none;">Auto 🪄</button>`
         : '';
       const undoBtn = e.is_manual
         ? `<button onclick="event.stopPropagation();undoAssign(${e.id})" class="btn btn-secondary focusable" tabindex="0" style="padding:6px 14px;font-size:0.8rem;">Undo</button>`
@@ -1114,6 +1117,20 @@ async function doAutoSort() {
     else { showToast(`✅ Auto-sorted ${result.assigned} episode(s)!`, 'success'); loadSeasons(currentSeries); }
   } catch(e) { showToast('Auto-sort failed: ' + e.message, 'error'); }
   finally { if (btn) { btn.textContent = '✨ Auto-Sort'; btn.disabled = false; } }
+}
+
+async function doAutoSortSingle(episodeId) {
+  try {
+    const ok = await window.DB.autoSortEpisode(episodeId);
+    if (ok) {
+      showToast('✅ Episode auto-assigned!', 'success');
+      loadEpisodes(currentSeason);
+    } else {
+      showToast('Could not automatically determine placement.', 'info');
+    }
+  } catch(e) {
+    showToast('Auto-sort failed: ' + e.message, 'error');
+  }
 }
 
 const playerModal = document.getElementById('player-modal');

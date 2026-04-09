@@ -430,6 +430,59 @@ async function autoSortSeason(seasonId) {
   return { assigned };
 }
 
+async function autoSortEpisode(episodeId) {
+  const ep = await db.episodes.get(episodeId);
+  if (!ep || ep.is_manual) return false;
+  
+  const season = await db.seasons.get(ep.seasonId);
+  if (!season) return false;
+
+  const allSeasonsForSeries = await db.seasons.where('seriesId').equals(season.seriesId).toArray();
+  const nonZeroSeasonIds = new Set(allSeasonsForSeries.filter(s => s.seasonNumber !== 0).map(s => s.id));
+
+  const knownInSeries = (await db.episodes.filter(e => nonZeroSeasonIds.has(e.seasonId)).toArray())
+    .map(async e => {
+      const s = await db.seasons.get(e.seasonId);
+      return { ...e, season_number: s?.seasonNumber };
+    });
+  const knownWithSeason = await Promise.all(knownInSeries);
+  const sortedKnown = knownWithSeason.sort((a, b) => a.messageId - b.messageId);
+
+  let lowerNeighbour = null, upperNeighbour = null;
+  for (const k of sortedKnown) {
+    if (k.messageId < ep.messageId) lowerNeighbour = k;
+    if (k.messageId > ep.messageId && !upperNeighbour) upperNeighbour = k;
+  }
+  if (!lowerNeighbour && !upperNeighbour) return false;
+
+  let seasonNumber, episodeNumber;
+
+  if (lowerNeighbour && upperNeighbour && lowerNeighbour.season_number === upperNeighbour.season_number) {
+    seasonNumber = lowerNeighbour.season_number;
+    const occupied = new Set(sortedKnown.filter(k => k.season_number === seasonNumber).map(k => k.episodeNumber));
+    let slot = lowerNeighbour.episodeNumber + 1;
+    while (occupied.has(slot) && slot < upperNeighbour.episodeNumber) slot++;
+    episodeNumber = slot;
+  } else if (lowerNeighbour) {
+    seasonNumber = lowerNeighbour.season_number;
+    const occupied = new Set(sortedKnown.filter(k => k.season_number === seasonNumber).map(k => k.episodeNumber));
+    let slot = lowerNeighbour.episodeNumber + 1;
+    while (occupied.has(slot)) slot++;
+    episodeNumber = slot;
+  } else {
+    seasonNumber = upperNeighbour.season_number;
+    const occupied = new Set(sortedKnown.filter(k => k.season_number === seasonNumber).map(k => k.episodeNumber));
+    let slot = Math.max(1, upperNeighbour.episodeNumber - 1);
+    while (occupied.has(slot) && slot > 0) slot--;
+    if (occupied.has(slot)) slot = upperNeighbour.episodeNumber + 1;
+    episodeNumber = slot;
+  }
+
+  const newSeasonId = await getOrCreateSeason(season.seriesId, seasonNumber);
+  await db.episodes.update(ep.id, { seasonId: newSeasonId, episodeNumber, is_manual: 1 });
+  return true;
+}
+
 // ── Sync (Telegram channel) ───────────────────────────────────────────
 
 async function getSyncPayload(userId) {
@@ -449,7 +502,7 @@ window.DB = {
   getOrCreateSeries, getAllSeries, getSeriesById,
   getOrCreateSeason, getSeasonsBySeriesId,
   upsertEpisode, getEpisodesBySeasonId, getIndexedMessageIds,
-  assignEpisode, resetEpisodeAssignment, autoSortSeason,
+  assignEpisode, resetEpisodeAssignment, autoSortSeason, autoSortEpisode,
   getUserSettings, updateUserSettings,
   updateProgress, getAllProgress, deleteProgress, getContinueWatching,
   addFavorite, removeFavorite, getFavorites, getFavoritesDetails,

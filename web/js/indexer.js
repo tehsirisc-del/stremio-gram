@@ -12,6 +12,7 @@ function parseTitle(rawTitle) {
   let episode = null;
 
   const fullPatterns = [
+    /(.*?)(\d+)\s*[-_.]?\s*(?:episode|פרק|פ|e|ep|ep\.)\s*[-_.]?\s*(\d+)(.*)/i,
     /(.*?)(?:season|עונה|s)\s*[-_.]?\s*(\d+)\s*[-_.]?\s*(?:episode|פרק|פ|e|ep|ep\.)\s*[-_.]?\s*(\d+)(.*)/i,
     /(.*?)(?:\s|[-_.])(\d{1,2})\s*x\s*(\d{1,3})(.*)/i,
     /(.*?)(?:ע)\s*[-_.]?\s*(\d+)\s*[-_.]?\s*(?:פ)\s*[-_.]?\s*(\d+)(.*)/i,
