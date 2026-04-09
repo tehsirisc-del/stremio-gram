@@ -304,17 +304,18 @@ public class StreamPlayerPlugin extends Plugin {
 
         // ── Hardware & Sync Fixes ───────────────────────────────────────────────
         DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(getContext())
-                .setEnableDecoderFallback(false); // CRITICAL: Disable software fallback which causes permanent desync on TV
+                .setEnableDecoderFallback(true); // Robustness: Allow software fallback to prevent black screens on hardware failure
 
         DefaultTrackSelector trackSelector = new DefaultTrackSelector(getContext());
-        // Enable Hardware Tunneling on Android TV. Routes audio/video directly to hardware for perfect sync.
-        trackSelector.setParameters(trackSelector.buildUponParameters().setTunnelingEnabled(true));
+        // Disabling Tunneling to prevent hardware sync hangs on resume/seek for non-4K content
+        trackSelector.setParameters(trackSelector.buildUponParameters().setTunnelingEnabled(false));
 
         // ── ExoPlayer ───────────────────────────────────────────────────────────
         player = new ExoPlayer.Builder(getContext())
                 .setRenderersFactory(renderersFactory)
                 .setTrackSelector(trackSelector)
                 .setLoadControl(loadControl)
+                .setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC) // Snap to keyframes for robust resuming
                 .setSeekForwardIncrementMs(seekStepMs)
                 .setSeekBackIncrementMs(seekStepMs)
                 .build();
