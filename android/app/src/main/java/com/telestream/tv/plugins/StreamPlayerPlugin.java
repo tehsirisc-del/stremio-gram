@@ -40,6 +40,8 @@ public class StreamPlayerPlugin extends Plugin {
     private ExoPlayer player;
     private PlayerView playerView;
     private Dialog dialog;
+    private long pendingSeekTo = 0;
+    private long currentSessionId = 0;
 
     private android.widget.TextView debugTextView;
     private android.widget.ScrollView debugScrollView;
@@ -59,9 +61,12 @@ public class StreamPlayerPlugin extends Plugin {
         final long messageId = Long.parseLong(call.getString("messageId", "0"));
         final String channel = call.getString("channel", "");
         final String title = call.getString("title", "Video");
-        final long fileSize = call.getLong("fileSize", 0L);
-        final long seekTo = call.getLong("progress", 0L) * 1000L;
-        final long seekStepMs = call.getLong("seekStep", 15L) * 1000L;
+        
+        // Robust numeric extraction: Capacitor often mis-types these as strings/doubles
+        // call.getData() returns a JSObject (JSONObject) which has optLong()
+        final long fileSize = call.getData().optLong("fileSize", 0L);
+        final long seekTo = call.getData().optLong("progress", 0L) * 1000L;
+        final long seekStepMs = call.getData().optLong("seekStep", 15L) * 1000L;
 
         Log.d(TAG, "play() messageId=" + messageId
                 + " channel=" + channel + " title=" + title
@@ -136,7 +141,7 @@ public class StreamPlayerPlugin extends Plugin {
         });
     }
 
-    private long currentSessionId = 0;
+
 
     private void releasePlayer(boolean isTransitioning) {
         long finalPos = 0;
@@ -339,8 +344,12 @@ public class StreamPlayerPlugin extends Plugin {
 
                 if (playbackState == androidx.media3.common.Player.STATE_READY)
                     state = "READY";
-                if (playbackState == androidx.media3.common.Player.STATE_ENDED)
+                if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
                     state = "ENDED";
+                    // Notify JS that the video naturally finished.
+                    // This is handled by a listener in index.html, not by playNextEpisode logic!
+                    emitEvent("player_ended", new JSObject());
+                }
                 updateNativeDebug("PlaybackState: " + state);
             }
         });
@@ -464,12 +473,24 @@ public class StreamPlayerPlugin extends Plugin {
         MediaSource mediaSource = new ProgressiveMediaSource.Factory(dataSourceFactory)
                 .createMediaSource(MediaItem.fromUri(currentBridgeDataSource.getUri()));
 
-        player.setMediaSource(mediaSource);
+        player.setMediaSource(mediaSource, seekTo); // Media3 hint
         player.prepare();
-
-        if (seekTo > 0) {
-            player.seekTo(seekTo);
-        }
+        
+        // Robust Seek Backup: Some sources ignore the startPosition in setMediaSource.
+        // We track it and re-apply when the player reports STATE_READY.
+        this.pendingSeekTo = seekTo;
+        
+        player.addListener(new androidx.media3.common.Player.Listener() {
+            @Override
+            public void onPlaybackStateChanged(int playbackState) {
+                if (playbackState == androidx.media3.common.Player.STATE_READY && pendingSeekTo > 0) {
+                    Log.d(TAG, "[TELESTREAM_DEBUG] STATE_READY: Applying pending seek to " + pendingSeekTo + "ms");
+                    player.seekTo(pendingSeekTo);
+                    pendingSeekTo = 0; // Clear so it doesn't seek again on buffer/pause
+                }
+            }
+        });
+        
         player.setPlayWhenReady(true);
 
         // ── Dialog lifecycle ────────────────────────────────────────────────────
@@ -481,8 +502,10 @@ public class StreamPlayerPlugin extends Plugin {
             long currentPos = 0;
             long currentDur = 0;
             if (thisPlayer != null) {
-                currentPos = thisPlayer.getCurrentPosition();
-                currentDur = thisPlayer.getDuration();
+                // Sanitize: ExoPlayer returns TIME_UNSET (-huge number) if not ready.
+                // Clamping to 0 prevents garbage values in the database.
+                currentPos = Math.max(0, thisPlayer.getCurrentPosition());
+                currentDur = Math.max(0, thisPlayer.getDuration());
             }
 
             if (player == thisPlayer) {
@@ -494,6 +517,9 @@ public class StreamPlayerPlugin extends Plugin {
 
             // Only fire if it's the current session.
             if (sessionId == currentSessionId) {
+                // ADB-Only Debug
+                Log.d(TAG, "[TELESTREAM_DEBUG] Player closing. Session=" + sessionId + " Pos=" + currentPos + " Dur=" + currentDur);
+                
                 JSObject data = new JSObject();
                 data.put("progress", currentPos);
                 data.put("duration", currentDur);

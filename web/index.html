@@ -75,7 +75,7 @@
       </div>
       <!-- Breadcrumb -->
       <div id="breadcrumb" data-nav-zone="breadcrumb">
-        <span class="breadcrumb-item focusable" id="bc-series" tabindex="0">Series</span>
+        <span class="breadcrumb-item" id="bc-series">Series</span>
       </div>
       <!-- Indexing Pill -->
       <div id="indexing-pill"><span class="spin">⏳</span> <span id="pill-text">Indexing...</span></div>
@@ -170,8 +170,8 @@
           This will clear your session and all locally cached data.
         </p>
 
-        <p style="text-align:center; color:#64748b; font-size:0.85rem; margin-top:40px; margin-bottom: 20px;">
-          App Version: <span id="app-version-display">v1.0.0</span>
+        <p style="text-align:center; color:#64748b; font-size:0.85rem; margin-top:40px; margin-bottom: 20px;" id="app-footer">
+          App Version: <span id="app-version-display">v1.0.1 (Official Release)</span>
         </p>
       </div>
     </div>
@@ -440,10 +440,10 @@ SpatialNav.init(handleBack);
 
 function updateBreadcrumb() {
   const bc = document.getElementById('breadcrumb');
-  let html = `<span class="breadcrumb-item focusable" id="bc-series" tabindex="0">Series</span>`;
+  let html = `<span class="breadcrumb-item" id="bc-series">Series</span>`;
   if (catalogView === 'seasons' || catalogView === 'episodes') {
     html += `<span class="breadcrumb-sep">/</span>
-             <span class="breadcrumb-item focusable" tabindex="0" id="bc-series-name">${currentSeries.title}</span>`;
+             <span class="breadcrumb-item" id="bc-series-name">${currentSeries.title}</span>`;
   }
   if (catalogView === 'episodes') {
     const sName = currentSeason.seasonNumber === 0 ? 'Unrecognized Episodes' : `Season ${currentSeason.seasonNumber}`;
@@ -476,9 +476,9 @@ async function loadContinueWatching() {
       card.className = 'card episode-card focusable';
       card.tabIndex = 0;
       card.innerHTML = `
-        <button onclick="event.stopPropagation();removeCW(${e.id})"
+        <button onclick="event.stopPropagation();removeCW(${e.id})" class="focusable"
           style="position:absolute;top:8px;right:8px;background:rgba(15,23,42,0.8);border:none;color:#94a3b8;
-                 width:28px;height:28px;border-radius:50%;font-size:1rem;cursor:pointer;z-index:20;
+                 width:32px;height:32px;border-radius:50%;font-size:1.2rem;cursor:pointer;z-index:20;
                  display:flex;align-items:center;justify-content:center;" tabindex="0">×</button>
         <div style="width:100%">
           <h4>${e.series_title} — E${e.episodeNumber}</h4>
@@ -1134,6 +1134,8 @@ async function playEpisode(ep) {
   
   try {
     currentPlayingEp = ep;
+    window.currentEpProgress = ep.progress_seconds || 0;
+    console.log(`[Play] Starting playback of Episode ID ${ep.id} from ${window.currentEpProgress}s`);
     autoNextActive = false;
     clearInterval(autoNextTimer);
     document.getElementById('auto-next-overlay').classList.remove('open');
@@ -1213,6 +1215,24 @@ function closePlayerUIOnly() {
   playerModal.classList.remove('open');
 }
 
+// ── Native Event Listeners ───────────────────────────────────────────────
+
+if (window.Capacitor && window.Capacitor.Plugins.StreamPlayer) {
+  const { StreamPlayer } = window.Capacitor.Plugins;
+
+  // Handle natural end of video
+  StreamPlayer.addListener('player_ended', async () => {
+    console.log('[TELESTREAM_DEBUG] Received player_ended event from native');
+    if (currentSettings.auto_next_enabled !== 0) {
+      // Small delay to let the user see the end or exit manually
+      startAutoNext(5); 
+    } else {
+      await syncProgressNow(true); // Mark as watched
+      closePlayer();
+    }
+  });
+}
+
 async function closePlayer() {
   // 1. Tell Java to close the ExoPlayer dialog FIRST — this fires onDismissListener
   //    which calls stopJsStream() and emits player_closed back to JS.
@@ -1226,7 +1246,9 @@ async function closePlayer() {
 
 async function syncProgressNow(forceWatched = false, nativeTimeMs, nativeDurMs) {
   if (!currentPlayingEp) return;
-  const t = (nativeTimeMs !== undefined) ? nativeTimeMs / 1000 : playerVideo.currentTime;
+  // Sanitize: Clamp to 0 to avoid huge negative values (TIME_UNSET) from ExoPlayer
+  const cleanTimeMs = (nativeTimeMs !== undefined && nativeTimeMs > 0) ? nativeTimeMs : 0;
+  const t = (nativeTimeMs !== undefined) ? cleanTimeMs / 1000 : playerVideo.currentTime;
   
   // Duration priority order (most reliable first):
   // 1. Previously stored progress duration (was correct when last saved)
@@ -1243,9 +1265,9 @@ async function syncProgressNow(forceWatched = false, nativeTimeMs, nativeDurMs) 
   
   const durationKnown = dur > 60;
   
-  console.log(`[ProgressSync] t=${t.toFixed(2)}s | stored=${storedDur.toFixed(0)}s | native=${nativeDurSec.toFixed(0)}s | indexed=${indexedDur.toFixed(0)}s | resolved=${dur.toFixed(0)}s | known=${durationKnown} | force=${forceWatched}`);
+  console.log(`[TELESTREAM_DEBUG] ProgressSync: t=${t.toFixed(2)}s | stored=${storedDur.toFixed(0)}s | native=${nativeDurSec.toFixed(0)}s | indexed=${indexedDur.toFixed(0)}s | resolved=${dur.toFixed(0)}s | known=${durationKnown} | force=${forceWatched}`);
 
-  if (t > 5 || forceWatched) {
+  if ((t > 5 || forceWatched) && (durationKnown || forceWatched)) {
     // SAFE: Only mark as Watched if we know the duration AND position is near the end.
     // If duration is unknown, NEVER auto-mark — only save progress time.
     const isWatched = forceWatched || (durationKnown && t >= (dur * 0.95));
@@ -1255,6 +1277,10 @@ async function syncProgressNow(forceWatched = false, nativeTimeMs, nativeDurMs) 
     const saveDur = durationKnown ? Math.floor(dur) : (storedDur > 0 ? Math.floor(storedDur) : 0);
     
     await window.DB.updateProgress(userId, currentPlayingEp.id, Math.floor(t), saveDur, isWatched ? 1 : 0);
+  } else if (t > 5) {
+     // Duration not known (maybe loading still), but we have some progress. 
+     // Save JUST the progress without marking as watched.
+     await window.DB.updateProgress(userId, currentPlayingEp.id, Math.floor(t), storedDur, 0);
   }
 }
 
@@ -1323,15 +1349,6 @@ playerVideo.addEventListener('timeupdate', () => {
   seekBar.value = (cur / dur) * 100;
   document.getElementById('time-current').textContent = formatTime(cur);
   document.getElementById('time-total').textContent   = formatTime(dur);
-
-  // REMOVED: Periodic background sync to keep app lightweight for TV hardware.
-  // Progress is now exclusively saved via the 'player_closed' event on exit.
-
-  // Auto-next trigger
-  if (currentSettings.auto_next_enabled !== 0 && !autoNextActive && dur > 0) {
-    const left = dur - cur;
-    if (left <= currentSettings.auto_next_countdown && left > 0) startAutoNext(Math.ceil(left));
-  }
 });
 
 seekBar.addEventListener('input', () => {
