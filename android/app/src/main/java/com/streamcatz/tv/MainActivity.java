@@ -20,11 +20,13 @@ import java.util.Map;
 import android.webkit.JavascriptInterface;
 
 import com.streamcatz.tv.plugins.StreamPlayerPlugin;
+import com.streamcatz.tv.plugins.UpdateCheckerPlugin;
 
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(StreamPlayerPlugin.class);
+        registerPlugin(UpdateCheckerPlugin.class);
         super.onCreate(savedInstanceState);
         
         // Add JS Interface for local IP and other bridge needs

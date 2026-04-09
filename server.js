@@ -818,9 +818,8 @@ function releaseSlot() {
   }
 }
 
-// ─── Internal Chunk Cache Manager ───────────────────────────────────────────
 // ─── Internal Chunk Cache Manager (LRU, byte-aware) ──────────────────────────
-const { LRUCache } = require('lru-cache');
+// LRUCache already imported above (line ~173), no need to re-import.
 const INTERNAL_CHUNK = 512 * 1024; // Match Telegram's natural block size
 
 const metrics = {

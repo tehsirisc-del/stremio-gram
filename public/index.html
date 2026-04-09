@@ -1007,6 +1007,13 @@
 
     });
   </script>
+  <!-- Updater -->
+  <script src="/js/updater.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+       if (window.AppUpdater) window.AppUpdater.checkOnLaunch();
+    });
+  </script>
   <!-- Toasts & Modals -->
   <div id="toast-container"></div>
 

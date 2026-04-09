@@ -44,6 +44,11 @@ public class StreamPlayerPlugin extends Plugin {
     private android.widget.TextView debugTextView;
     private android.widget.ScrollView debugScrollView;
 
+    private android.widget.TextView seekIndicator;
+    private Runnable hideSeekIndicatorRunnable;
+
+
+
     private ShareServer shareServer = null;
 
     private BridgeDataSource currentBridgeDataSource;
@@ -64,8 +69,9 @@ public class StreamPlayerPlugin extends Plugin {
 
         getActivity().runOnUiThread(() -> {
             try {
-                releasePlayer();
-                setupPlayerAndDialog(channel, messageId, fileSize, title, seekTo, seekStepMs);
+                currentSessionId++;
+                releasePlayer(true); // Is transitioning so we skip player_closed event
+                setupPlayerAndDialog(channel, messageId, fileSize, title, seekTo, seekStepMs, currentSessionId);
                 call.resolve();
             } catch (Exception e) {
                 Log.e(TAG, "setupPlayerAndDialog failed", e);
@@ -85,7 +91,7 @@ public class StreamPlayerPlugin extends Plugin {
     @PluginMethod
     public void close(PluginCall call) {
         getActivity().runOnUiThread(() -> {
-            releasePlayer();
+            releasePlayer(false); // Explicit close by user
             call.resolve();
         });
     }
@@ -130,28 +136,52 @@ public class StreamPlayerPlugin extends Plugin {
         });
     }
 
-    private void releasePlayer() {
+    private long currentSessionId = 0;
+
+    private void releasePlayer(boolean isTransitioning) {
+        long finalPos = 0;
+        long finalDur = 0;
+
         if (currentBridgeDataSource != null) {
             currentBridgeDataSource.stopJsStream(); // Unblocks any indefinitely hanging read() loop immediately
             currentBridgeDataSource = null;
         }
+
         if (player != null) {
+            finalPos = player.getCurrentPosition();
+            finalDur = player.getDuration();
             player.stop();
             player.release();
             player = null;
         }
+
         if (dialog != null) {
+            dialog.setOnDismissListener(null);
             dialog.dismiss();
             dialog = null;
         }
+
+        if (!isTransitioning) {
+            try {
+                // Return exact stop position to JS before the player is destroyed
+                JSObject data = new JSObject();
+                data.put("progress", finalPos);
+                data.put("duration", finalDur);
+                emitEvent("player_closed", data);
+            } catch (Exception e) {}
+        }
+
         if (localFeedServer != null) {
             localFeedServer.stopServer();
             localFeedServer = null;
         }
+        if (hideSeekIndicatorRunnable != null && getContext() != null) {
+            // Cleanup any pending UI hide
+        }
     }
 
     private void setupPlayerAndDialog(String channel, long messageId, long fileSize, String title,
-            long seekTo, long seekStepMs) {
+            long seekTo, long seekStepMs, long sessionId) {
         Log.d(TAG, "setupPlayerAndDialog title=" + title);
 
         // ── Full-screen dialog ──────────────────────────────────────────────────
@@ -179,41 +209,70 @@ public class StreamPlayerPlugin extends Plugin {
         debugScrollView.addView(debugTextView);
         rootLayout.addView(debugScrollView);
 
-        // ── Toggle Debug Button ────────────────────────────────────────────────
-        android.widget.Button debugToggleBtn = new android.widget.Button(getContext());
-        debugToggleBtn.setText("Toggle Debug");
-        debugToggleBtn.setAllCaps(false);
-        debugToggleBtn.setTextSize(10);
-        debugToggleBtn.setAlpha(0.3f); // Subtle when not focused
-        debugToggleBtn.setBackgroundColor(Color.TRANSPARENT);
+        // Progress feedback setup moved below to be internal to playerView
 
-        android.widget.FrameLayout.LayoutParams btnParams = new android.widget.FrameLayout.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT);
-        btnParams.gravity = android.view.Gravity.TOP | android.view.Gravity.RIGHT;
-        btnParams.setMargins(0, 10, 10, 0);
-        debugToggleBtn.setLayoutParams(btnParams);
-        debugToggleBtn.setFocusable(true);
-        debugToggleBtn.setFocusableInTouchMode(true);
+        hideSeekIndicatorRunnable = () -> {
+            if (seekIndicator != null) {
+                seekIndicator.animate().alpha(0f).scaleX(0.8f).scaleY(0.8f).setDuration(250).withEndAction(() -> {
+                    seekIndicator.setVisibility(android.view.View.GONE);
+                }).start();
+            }
+        };
 
-        debugToggleBtn.setOnClickListener(v -> {
+
+        // ── Integrated Debug Icon (Inside PlayerView) ────────────────────────
+        android.widget.ImageButton debugIcon = new android.widget.ImageButton(getContext());
+        debugIcon.setImageResource(android.R.drawable.ic_menu_info_details);
+        debugIcon.setBackgroundColor(Color.TRANSPARENT);
+        debugIcon.setAlpha(0.5f);
+        debugIcon.setFocusable(true);
+        debugIcon.setPadding(20, 20, 20, 20);
+        android.widget.FrameLayout.LayoutParams bugParams = new android.widget.FrameLayout.LayoutParams(
+                120, 120);
+        bugParams.gravity = android.view.Gravity.TOP | android.view.Gravity.RIGHT;
+        bugParams.setMargins(0, 40, 40, 0);
+        debugIcon.setLayoutParams(bugParams);
+        
+        debugIcon.setOnClickListener(v -> {
             int vis = debugScrollView.getVisibility() == android.view.View.VISIBLE ? android.view.View.GONE
                     : android.view.View.VISIBLE;
             debugScrollView.setVisibility(vis);
         });
+        
+        debugIcon.setOnFocusChangeListener((v, hasFocus) -> {
+            debugIcon.setAlpha(hasFocus ? 1.0f : 0.5f);
+            debugIcon.setScaleX(hasFocus ? 1.2f : 1.0f);
+            debugIcon.setScaleY(hasFocus ? 1.2f : 1.0f);
+        });
+        
+        playerView.addView(debugIcon);
 
-        // Visually change when focused so TV users know they are on it
-        debugToggleBtn.setOnFocusChangeListener((v, hasFocus) -> {
-            if (hasFocus) {
-                debugToggleBtn.setAlpha(1.0f);
-                debugToggleBtn.setBackgroundColor(Color.argb(100, 255, 255, 255));
-            } else {
-                debugToggleBtn.setAlpha(0.3f);
-                debugToggleBtn.setBackgroundColor(Color.TRANSPARENT);
+        // Visibility sync: Show debug button only when controller is visible
+        playerView.setControllerVisibilityListener(new PlayerView.ControllerVisibilityListener() {
+            @Override
+            public void onVisibilityChanged(int visibility) {
+                debugIcon.setVisibility(visibility);
             }
         });
 
-        rootLayout.addView(debugToggleBtn);
+        // ── "Internal" Seek Indicator (Inside PlayerView) ──────────────────────
+        seekIndicator = new android.widget.TextView(getContext());
+        seekIndicator.setTextSize(36);
+        seekIndicator.setTextColor(Color.WHITE);
+        seekIndicator.setPadding(60, 30, 60, 30);
+        seekIndicator.setGravity(android.view.Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable pill = new android.graphics.drawable.GradientDrawable();
+        pill.setColor(Color.argb(230, 0, 0, 0)); // Darker for high contrast
+        pill.setCornerRadius(100f); 
+        seekIndicator.setBackground(pill);
+        
+        android.widget.FrameLayout.LayoutParams seekParams = new android.widget.FrameLayout.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT);
+        seekParams.gravity = android.view.Gravity.CENTER;
+        seekIndicator.setLayoutParams(seekParams);
+        seekIndicator.setVisibility(android.view.View.GONE);
+        seekIndicator.setZ(999f); 
+        playerView.addView(seekIndicator);
 
         dialog.setContentView(rootLayout);
 
@@ -268,8 +327,16 @@ public class StreamPlayerPlugin extends Plugin {
             @Override
             public void onPlaybackStateChanged(int playbackState) {
                 String state = "UNKNOWN";
-                if (playbackState == androidx.media3.common.Player.STATE_BUFFERING)
+                android.view.View playPauseBtn = playerView.findViewById(androidx.media3.ui.R.id.exo_center_controls);
+                if (playPauseBtn == null) playPauseBtn = playerView.findViewById(androidx.media3.ui.R.id.exo_play_pause);
+
+                if (playbackState == androidx.media3.common.Player.STATE_BUFFERING) {
                     state = "BUFFERING";
+                    if (playPauseBtn != null) playPauseBtn.setVisibility(android.view.View.INVISIBLE);
+                } else {
+                    if (playPauseBtn != null) playPauseBtn.setVisibility(android.view.View.VISIBLE);
+                }
+
                 if (playbackState == androidx.media3.common.Player.STATE_READY)
                     state = "READY";
                 if (playbackState == androidx.media3.common.Player.STATE_ENDED)
@@ -280,17 +347,103 @@ public class StreamPlayerPlugin extends Plugin {
 
         playerView.setPlayer(player);
         playerView.setUseController(true);
+        playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS);
         playerView.requestFocus();
 
-        // Toggle debug console with a key (DPAD_UP for TV)
+        // Apply TimeBar appearance IMMEDIATELY at open, not on first key press.
+        // This ensures focus colors are correct from the very first user interaction.
+        playerView.post(() -> {
+            android.view.View timeBarView = playerView.findViewById(androidx.media3.ui.R.id.exo_progress);
+            if (timeBarView instanceof androidx.media3.ui.DefaultTimeBar) {
+                androidx.media3.ui.DefaultTimeBar dtb = (androidx.media3.ui.DefaultTimeBar) timeBarView;
+                dtb.setKeyTimeIncrement(seekStepMs);
+                // Default (unfocused) state: muted blue played bar, invisible scrubber
+                dtb.setPlayedColor(Color.parseColor("#3B82F6"));
+                dtb.setScrubberColor(Color.TRANSPARENT);
+                dtb.setUnplayedColor(Color.argb(50, 255, 255, 255));
+
+                timeBarView.setOnFocusChangeListener((v2, hasFocus) -> {
+                    // Focused: white bar + visible white scrubber (Big Tech style)
+                    dtb.setPlayedColor(hasFocus ? Color.WHITE : Color.parseColor("#3B82F6"));
+                    dtb.setScrubberColor(hasFocus ? Color.WHITE : Color.TRANSPARENT);
+                    dtb.setUnplayedColor(hasFocus ? Color.argb(100, 255, 255, 255) : Color.argb(50, 255, 255, 255));
+                });
+            }
+        });
+
+        // Toggle debug console
         playerView.setOnKeyListener((v, keyCode, event) -> {
-            if (event.getAction() == android.view.KeyEvent.ACTION_DOWN &&
-                    (keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP
-                            || keyCode == android.view.KeyEvent.KEYCODE_MENU)) {
+            boolean isDown = event.getAction() == android.view.KeyEvent.ACTION_DOWN;
+            if (isDown && (keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP || keyCode == android.view.KeyEvent.KEYCODE_MENU)) {
                 if (debugScrollView != null) {
                     int vis = debugScrollView.getVisibility() == android.view.View.VISIBLE ? android.view.View.GONE
                             : android.view.View.VISIBLE;
                     debugScrollView.setVisibility(vis);
+                    return true;
+                }
+            }
+            return false;
+        });
+
+        // Remote Controls and Back button behavior
+        dialog.setOnKeyListener((dialogInterface, keyCode, event) -> {
+            boolean isDown = event.getAction() == android.view.KeyEvent.ACTION_DOWN;
+            boolean isUp = event.getAction() == android.view.KeyEvent.ACTION_UP;
+
+            if (isDown && player != null) {
+                if (!playerView.isControllerFullyVisible()) {
+                    if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_CENTER || keyCode == android.view.KeyEvent.KEYCODE_ENTER) {
+                        player.setPlayWhenReady(!player.getPlayWhenReady());
+                        playerView.showController();
+                        return true;
+                    } else if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT || keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        playerView.showController();
+                        android.view.View timeBar = playerView.findViewById(androidx.media3.ui.R.id.exo_progress);
+                        
+                        // Seek Feedback Pop-up
+                        if (seekIndicator != null) {
+                            String direction = (keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT) ? "« -" : "+ »";
+                            seekIndicator.setText(direction + (seekStepMs / 1000) + "s");
+                            
+                            // Dynamic positioning based on direction
+                            android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) seekIndicator.getLayoutParams();
+                            if (keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT) {
+                                lp.gravity = android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.LEFT;
+                                lp.setMargins(120, 0, 0, 0);
+                            } else {
+                                lp.gravity = android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.RIGHT;
+                                lp.setMargins(0, 0, 120, 0);
+                            }
+                            seekIndicator.setLayoutParams(lp);
+
+                            seekIndicator.setVisibility(android.view.View.VISIBLE);
+                            seekIndicator.setAlpha(0f);
+                            seekIndicator.setScaleX(0.7f);
+                            seekIndicator.setScaleY(0.7f);
+                            seekIndicator.animate().alpha(1f).scaleX(1.1f).scaleY(1.1f)
+                                .setDuration(150).withEndAction(() -> {
+                                    seekIndicator.animate().scaleX(1.0f).scaleY(1.0f).setDuration(100).start();
+                                }).start();
+                            seekIndicator.removeCallbacks(hideSeekIndicatorRunnable);
+                            seekIndicator.postDelayed(hideSeekIndicatorRunnable, 1200);
+                        }
+
+                        if (timeBar != null) {
+                            if (timeBar instanceof androidx.media3.ui.DefaultTimeBar) {
+                                // Just ensure key increment is set with latest seekStepMs value
+                                ((androidx.media3.ui.DefaultTimeBar) timeBar).setKeyTimeIncrement(seekStepMs);
+                            }
+                            timeBar.requestFocus();
+                            timeBar.dispatchKeyEvent(event);
+                        }
+                        return true;
+                    }
+                }
+            }
+
+            if (isUp && keyCode == android.view.KeyEvent.KEYCODE_BACK) {
+                if (playerView != null && playerView.isControllerFullyVisible()) {
+                    playerView.hideController();
                     return true;
                 }
             }
@@ -321,10 +474,16 @@ public class StreamPlayerPlugin extends Plugin {
 
         // ── Dialog lifecycle ────────────────────────────────────────────────────
         final ExoPlayer thisPlayer = player;
-        final Dialog thisDialog = dialog;
 
         dialog.setOnDismissListener(d -> {
-            Log.d(TAG, "dialog dismissed — releasing player");
+            Log.d(TAG, "dialog dismissed — releasing player (Session " + sessionId + ")");
+
+            long currentPos = 0;
+            long currentDur = 0;
+            if (thisPlayer != null) {
+                currentPos = thisPlayer.getCurrentPosition();
+                currentDur = thisPlayer.getDuration();
+            }
 
             if (player == thisPlayer) {
                 player = null;
@@ -333,8 +492,12 @@ public class StreamPlayerPlugin extends Plugin {
                 thisPlayer.release();
             }
 
-            if (dialog == thisDialog && bridge != null) {
-                bridge.triggerWindowJSEvent("player_closed", "{}");
+            // Only fire if it's the current session.
+            if (sessionId == currentSessionId) {
+                JSObject data = new JSObject();
+                data.put("progress", currentPos);
+                data.put("duration", currentDur);
+                emitEvent("player_closed", data);
             }
         });
 

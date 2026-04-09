@@ -4,4 +4,5 @@
     <string name="title_activity_main">StreamCatz TV</string>
     <string name="package_name">com.streamcatz.tv</string>
     <string name="custom_url_scheme">com.streamcatz.tv</string>
+    <string name="file_provider_authority">com.streamcatz.tv.fileprovider</string>
 </resources>
