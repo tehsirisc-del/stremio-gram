@@ -34,6 +34,9 @@ const SpatialNav = (() => {
     }, true);
   }
 
+  let lastNavTime = 0;
+  const NAV_THROTTLE = 85; // ms between moves
+
   // ── Key Handler ───────────────────────────────────────────────────────────
   function handleKey(e) {
     if (isBlocked()) {
@@ -66,8 +69,6 @@ const SpatialNav = (() => {
             active.readOnly = false;
             active.focus();
           } else {
-            // Already editable? Force a re-focus to ensure keyboard pops up
-            // via a quick blur/focus cycle which is most reliable on Android TV.
             active.blur();
             active.focus();
           }
@@ -77,6 +78,34 @@ const SpatialNav = (() => {
         active.click();
       }
       return;
+    }
+
+    // ── Navigation Throttle Logic ──
+    const now = Date.now();
+    const isArrow = key.startsWith('Arrow');
+    const timeSinceLast = now - lastNavTime;
+
+    if (isArrow) {
+      if (timeSinceLast < 150) {
+          document.body.classList.add('fast-nav');
+          // If spamming extremely fast (<65ms), use minimal overhead mode
+          if (timeSinceLast < 65) {
+              document.body.classList.add('very-fast-nav');
+          }
+      }
+
+      if (timeSinceLast < NAV_THROTTLE) {
+          e.preventDefault();
+          return; 
+      }
+      lastNavTime = now;
+
+      // Clear classes after a short delay of inactivity
+      clearTimeout(window._fastNavTimeout);
+      window._fastNavTimeout = setTimeout(() => {
+          document.body.classList.remove('fast-nav');
+          document.body.classList.remove('very-fast-nav');
+      }, 250);
     }
 
     e.preventDefault();
@@ -144,24 +173,20 @@ const SpatialNav = (() => {
         if (key === 'ArrowUp'   && dy >= 0) continue;
 
         // --- SPECIAL LOGIC FOR UPDATE NOTIF PILL ---
-        // 1. If moving UP to notif zone, remember where we came from
         if (key === 'ArrowUp' && elZone === 'notif' && currentZone === 'tabs') {
             lastTabFocus = active;
         }
-        // 2. If moving DOWN from notif zone, restore last known tab focus
         if (key === 'ArrowDown' && currentZone === 'notif' && elZone === 'tabs') {
             if (lastTabFocus && focusables.indexOf(lastTabFocus) !== -1) {
                 best = lastTabFocus;
-                break; // Found our exact target
+                break;
             }
         }
 
-        // If moving to the Tab Bar from below, only target the ACTIVE tab to avoid losing horizontal context.
         if (key === 'ArrowUp' && elZone === 'tabs' && currentZone !== 'tabs' && currentZone !== 'notif') {
           if (!el.classList.contains('active')) continue;
         }
 
-        // Favor vertical proximity heavily over horizontal misalignment to avoid skipping over rows
         const score = Math.abs(dy) * 100 + Math.abs(dx);
         if (score < bestScore) { bestScore = score; best = el; }
       }
@@ -169,7 +194,8 @@ const SpatialNav = (() => {
 
     if (best) {
       best.focus();
-      best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+      // Use CSS smooth scroll, behavior 'auto' respects current CSS state
+      best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
     }
   }
 

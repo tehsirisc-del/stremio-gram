@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#0B0C10">
   <title>TeleStream</title>
   <link rel="stylesheet" href="css/tv-style.css">
   <!-- Libraries -->
@@ -302,10 +305,15 @@
 <script>
 // ── State ───────────────────────────────────────────────────────────────
 let currentView = 'catalog';
-let catalogView = 'series';  // series | seasons | episodes
+let catalogView = 'series'; // 'series', 'seasons', 'episodes'
 let currentSeries = null;
 let currentSeason = null;
-let currentPlayingEp = null;
+let currentEpisode = null;
+
+// Focus memory
+let lastFocusedSeriesId = null;
+let lastFocusedSeasonId = null;
+let lastFocusedEpisodeId = null;
 let currentSettings = { auto_next_enabled: 1, auto_next_countdown: 15, seek_step: 15 };
 let autoNextActive = false;
 let autoNextTimer = null;
@@ -565,10 +573,13 @@ async function loadCatalogSeries(skipFocus = false) {
   loadContinueWatching();
 
   const row = document.getElementById('catalog-row');
-  const isRefreshing = row.children.length > 0 && !row.querySelector('.placeholder-card');
+  // Only skip clearing if we are already in 'series' view to avoid mixing seasons/series
+  const wasSeriesView = row.dataset.lastView === 'series';
+  const isRefreshing = wasSeriesView && row.children.length > 0 && !row.querySelector('.placeholder-card');
   
   if (!isRefreshing) {
     row.innerHTML = '';
+    row.dataset.lastView = 'series';
     for (let i = 0; i < 8; i++) {
         const ph = document.createElement('div');
         ph.className = 'placeholder-card series-card';
@@ -621,7 +632,15 @@ async function loadCatalogSeries(skipFocus = false) {
         ${badgeHtml}
         <div class="card-body">${avatarHtml}<h3>${s.title}</h3></div>
         ${progressHtml}`;
-      card.onclick = () => loadSeasons(s);
+      card.onclick = () => {
+        // Reset season/episode memory when switching to a NEW series
+        if (lastFocusedSeriesId !== s.id) {
+            lastFocusedSeasonId = null;
+            lastFocusedEpisodeId = null;
+        }
+        lastFocusedSeriesId = s.id;
+        loadSeasons(s);
+      };
     });
 
     // 2. Show indexing sources that haven't created series yet
@@ -653,7 +672,15 @@ async function loadCatalogSeries(skipFocus = false) {
         }
     });
 
-    if (!skipFocus && !isRefreshing && row.firstElementChild) row.firstElementChild.focus();
+    if (!skipFocus && !isRefreshing) {
+        requestAnimationFrame(() => {
+            if (lastFocusedSeriesId) {
+                const target = row.querySelector(`[data-series-id="${lastFocusedSeriesId}"]`);
+                if (target) { target.focus(); return; }
+            }
+            if (row.firstElementChild) row.firstElementChild.focus();
+        });
+    }
   } catch(e) { console.error(e); }
 }
 
@@ -666,11 +693,17 @@ async function loadSeasons(series) {
   loadContinueWatching();
 
   const row = document.getElementById('catalog-row');
-  row.innerHTML = '';
-  for (let i = 0; i < 4; i++) {
-    const ph = document.createElement('div');
-    ph.className = 'placeholder-card season-card';
-    row.appendChild(ph);
+  const wasSeasonsView = row.dataset.lastView === 'seasons';
+  const isRefreshing = wasSeasonsView && row.children.length > 0;
+  
+  if (!isRefreshing) {
+    row.innerHTML = '';
+    row.dataset.lastView = 'seasons';
+    for (let i = 0; i < 4; i++) {
+      const ph = document.createElement('div');
+      ph.className = 'placeholder-card season-card';
+      row.appendChild(ph);
+    }
   }
 
   try {
@@ -702,7 +735,11 @@ async function loadSeasons(series) {
       card.tabIndex = 0;
       card.innerHTML = `<h3>${s.seasonNumber === 0 ? 'Unrecognized Episodes' : 'Season ' + s.seasonNumber}</h3>`;
       card.onclick = () => loadSeasons(s); // Wait, this should loadEpisodes! But it was loadEpisodes originally. Let me just rewrite it.
-      card.onclick = () => loadEpisodes(s);
+      card.dataset.seasonId = s.id; // Store for memory
+      card.onclick = () => {
+        lastFocusedSeasonId = s.id;
+        loadEpisodes(s);
+      };
       row.appendChild(card);
     });
     
@@ -711,8 +748,15 @@ async function loadSeasons(series) {
         // Clean up any previously added fav button from previous view
     }
 
-    if (favBar) favBar.firstElementChild.focus();
-    else if (row.firstElementChild) row.firstElementChild.focus();
+    requestAnimationFrame(() => {
+        if (lastFocusedSeasonId) {
+            const target = row.querySelector(`[data-season-id="${lastFocusedSeasonId}"]`);
+            if (target) { target.focus(); return; }
+        }
+        // Always prefer the first season card over the Favorites button
+        if (row.firstElementChild) row.firstElementChild.focus();
+        else if (favBar) favBar.firstElementChild.focus();
+    });
   } catch(e) { console.error(e); }
 }
 
@@ -726,11 +770,17 @@ async function loadEpisodes(season) {
   loadContinueWatching();
 
   const row = document.getElementById('catalog-row');
-  row.innerHTML = '';
-  for (let i = 0; i < 6; i++) {
-    const ph = document.createElement('div');
-    ph.className = 'placeholder-card episode-card';
-    row.appendChild(ph);
+  const wasEpisodesView = row.dataset.lastView === 'episodes';
+  const isRefreshing = wasEpisodesView && row.children.length > 0;
+  
+  if (!isRefreshing) {
+    row.innerHTML = '';
+    row.dataset.lastView = 'episodes';
+    for (let i = 0; i < 6; i++) {
+      const ph = document.createElement('div');
+      ph.className = 'placeholder-card episode-card';
+      row.appendChild(ph);
+    }
   }
 
   try {
@@ -787,15 +837,39 @@ async function loadEpisodes(season) {
         <div class="episode-meta">${mbSize} MB${((e.progress_duration > 60) ? ' | ' + formatTime(e.progress_duration) : (e.duration > 60 ? ' | ' + formatTime(e.duration) : ''))}</div>
         ${pbHtml}
         <div style="display:flex;gap:8px;margin-top:10px;">${assignBtn}${undoBtn}</div>`;
-      const clickArea = card;
+      card.dataset.episodeId = e.id;
       card.onclick = (ev) => {
         // Only ignore if clicking a button inside (fav/assign), otherwise play
         if (ev.target.closest('.fav-btn') || ev.target.closest('.btn')) return;
+        lastFocusedEpisodeId = e.id;
         playEpisode(e);
       };
       row.appendChild(card);
     });
-    if (row.firstElementChild) row.firstElementChild.focus();
+    // Restore focus memory (Targeted to episodes row)
+    const catalogRow = document.getElementById('catalog-row');
+    
+    setTimeout(() => {
+        const idToFocus = lastFocusedEpisodeId;
+        
+        if (idToFocus) {
+            const target = document.querySelector(`[data-episode-id="${idToFocus}"]`);
+            if (target) { 
+                target.focus(); 
+                return; 
+            }
+        }
+        
+        // Fallback: specifically look for an episode card first
+        const firstEp = row.querySelector('.episode-card');
+        if (firstEp) {
+            firstEp.focus();
+        } else {
+            const anyFirstInRow = row.querySelector('.focusable');
+            if (anyFirstInRow) anyFirstInRow.focus();
+        }
+    }, 100); 
+
   } catch(e) { console.error(e); }
 }
 
@@ -855,11 +929,17 @@ async function loadFavorites() {
             onclick="event.stopPropagation();toggleFav('episode',${ep.id},true)">❤️</button>
           <h4>${ep.series_title} — S${ep.season_number} E${ep.episodeNumber}</h4>
           <p>${ep.title}</p>`;
-        card.onclick = () => playEpisode(ep);
+        card.dataset.episodeId = ep.id;
+      card.onclick = () => {
+        lastFocusedEpisodeId = ep.id;
+        playEpisode(ep);
+      };
         row.appendChild(card);
       });
       cont.appendChild(row);
     }
+
+    // Removed misplaced focus memory logic from here
   } catch(e) { console.error(e); }
 }
 
