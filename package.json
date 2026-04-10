@@ -1,6 +1,6 @@
 {
   "name": "telestream",
-  "version": "1.1.0",
+  "version": "1.2.6",
   "description": "TeleStream - Telegram Media Player for Android TV",
   "main": "index.js",
   "scripts": {

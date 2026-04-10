@@ -149,26 +149,20 @@
           </label>
         </div>
 
-        <div class="settings-row focusable" tabindex="0" id="countdown-row-wrapper">
+        <div class="settings-row focusable" tabindex="0" id="countdown-row-wrapper" onclick="openCountdownModal()">
           <div class="settings-label" id="countdown-label">
             <h4>Countdown Duration</h4>
             <p>Wait time before auto-playing the next episode (seconds)</p>
           </div>
-          <input type="number" id="setting-countdown" class="styled-input focusable" min="1" max="60" tabindex="0" style="width:90px; text-align:center; padding:10px; background:#1e293b;" onchange="autoSaveSettings()" readonly>
+          <div id="countdown-val" class="settings-value" data-value="15">15s</div>
         </div>
 
-        <div class="settings-row focusable" tabindex="0" id="setting-seek-step-row">
+        <div class="settings-row focusable" tabindex="0" id="setting-seek-step-row" onclick="openSeekStepModal()">
           <div class="settings-label">
             <h4>Seek Interval</h4>
             <p>Seconds to skip forward/back with remote keys.</p>
           </div>
-          <select id="setting-seek-step" class="styled-input focusable" tabindex="0" style="width:90px; background:#1e293b; color:white; border:none; text-align:center;" onchange="autoSaveSettings()">
-            <option value="5">5s</option>
-            <option value="10">10s</option>
-            <option value="15" selected>15s</option>
-            <option value="30">30s</option>
-            <option value="60">60s</option>
-          </select>
+          <div id="seek-step-display" class="settings-value">15s</div>
         </div>
 
         <div class="settings-section-title">Display</div>
@@ -259,30 +253,98 @@
 <!-- ── Add Source Modal ───────────────────────────────── -->
 <div id="add-source-modal" class="modal-overlay">
   <div class="modal-box" style="max-width:560px;">
-    <h2>📡 Add New Source</h2>
-    <p>Enter the Telegram channel to add as a content source.</p>
-    <div class="add-source-form">
-      <div class="form-row">
-        <label>Source Name (optional)</label>
-        <input type="text" id="source-name-input" class="styled-input focusable" placeholder="e.g. Breaking Bad" tabindex="0" readonly>
+    
+    <!-- Step 1: Initial Choice -->
+    <div class="wizard-step active" id="add-step-start">
+      <h2>📡 Add New Source</h2>
+      <p>How would you like to add the content source?</p>
+      <div class="modal-grid">
+        <button class="btn btn-secondary focusable" id="choice-qr" tabindex="0" onclick="goToAddStep('qr')">
+          📱 Share Link from Phone (QR)
+        </button>
+        <button class="btn btn-secondary focusable" id="choice-manual" tabindex="0" onclick="goToAddStep('link')">
+          ⌨️ Enter Link Manually
+        </button>
+        <button class="btn btn-secondary focusable" onclick="closeModal('add-source-modal')" tabindex="0" style="margin-top:20px; opacity:0.6;">Cancel</button>
       </div>
-      <div class="form-row">
-        <label>Telegram Channel</label>
-        <div class="input-group">
-          <span class="input-prefix">t.me/</span>
-          <input type="text" id="source-link-input" class="styled-input" placeholder="channel_id" tabindex="0" readonly>
-        </div>
-      </div>
-      <div class="modal-btns" style="justify-content:center;gap:12px;margin-top:8px;">
-        <button class="btn btn-primary focusable"   id="btn-single-series" tabindex="0">🎥 Single Series</button>
-        <button class="btn btn-secondary focusable" id="btn-multi-series"  tabindex="0">📺 Multiple Series</button>
-      </div>
-      <button class="btn btn-primary focusable" id="share-phone-btn" tabindex="0"
-        style="background:#0ea5e9;width:100%;margin-top:4px;">
-        📱 Share Link from Phone
-      </button>
-      <button class="btn btn-secondary focusable" id="cancel-source-modal" tabindex="0" style="width:100%;">Cancel</button>
     </div>
+
+    <!-- Step: QR Code -->
+    <div class="wizard-step center-align" id="add-step-qr">
+      <h2>📱 Scan to Share</h2>
+      <p>Scan this QR code with your phone. Any link you share will appear here automatically.</p>
+      <div id="wizard-qr-container" style="background:#fff;padding:16px;display:inline-block;border-radius:10px;margin:15px auto;"></div>
+      <div id="wizard-qr-link-text" style="font-size:0.9rem; color:var(--accent); word-break:break-all; margin-bottom:15px; min-height:1.2em;"></div>
+      <div style="color:#fbbf24; font-size:0.85rem; margin-bottom:20px;">
+        ⚠️ וודא שהטלפון והטלוויזיה מחוברים ל<b>אותו Wi-Fi</b>
+      </div>
+      <button class="btn btn-secondary focusable" onclick="goToAddStep('start')" tabindex="0">Back</button>
+    </div>
+
+    <!-- Step 2: Manual Link -->
+    <div class="wizard-step" id="add-step-link">
+      <h2>⌨️ Enter Link</h2>
+      <p>Enter the Telegram channel link or ID.</p>
+      <div class="input-group" style="margin-bottom:24px;">
+        <span class="input-prefix">t.me/</span>
+        <input type="text" id="wizard-link-input" class="styled-input focusable" placeholder="channel_username" tabindex="0" readonly>
+      </div>
+      <div id="wizard-link-error" class="wizard-error"></div>
+      <div class="modal-btns">
+        <button class="btn btn-primary focusable" id="btn-next-link" tabindex="0">Next</button>
+        <button class="btn btn-secondary focusable" onclick="goToAddStep('start')" tabindex="0">Back</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Validating / Fetching Metadata -->
+    <div class="wizard-step" id="add-step-loading">
+      <h2>🔍 Fetching Details</h2>
+      <p>Connecting to Telegram to verify the channel...</p>
+      <div style="display:flex; justify-content:center; padding:40px;">
+        <span class="spin" style="font-size:3rem;">⏳</span>
+      </div>
+    </div>
+
+    <!-- Step 4: Confirm/Edit Name -->
+    <div class="wizard-step" id="add-step-confirm">
+      <h2 id="confirm-source-title">Confirm Name</h2>
+      <div id="confirm-source-avatar-container" style="display:flex; justify-content:center; margin-bottom:15px;"></div>
+      <p>We found this channel. Does the name look correct?</p>
+      <h3 id="fetched-name-display" style="text-align:center; font-size:1.8rem; margin-bottom:30px; color:var(--accent);"></h3>
+      <div class="modal-btns">
+        <button class="btn btn-primary focusable" id="btn-confirm-yes" tabindex="0">✅ Yes, Correct</button>
+        <button class="btn btn-secondary focusable" id="btn-confirm-edit" tabindex="0">✏️ Edit Name</button>
+      </div>
+    </div>
+
+    <!-- Step 5: Edit Name (Optional) -->
+    <div class="wizard-step" id="add-step-rename">
+      <h2>✏️ Edit Name</h2>
+      <p>Choose a display name for this source.</p>
+      <input type="text" id="wizard-name-input" class="styled-input focusable" style="margin-bottom:24px;" tabindex="0" readonly>
+      <div class="modal-btns">
+        <button class="btn btn-primary focusable" id="btn-save-rename" tabindex="0">Save & Next</button>
+        <button class="btn btn-secondary focusable" onclick="goToAddStep('confirm')" tabindex="0">Back</button>
+      </div>
+    </div>
+
+    <!-- Step 6: Series Type -->
+    <div class="wizard-step" id="add-step-type">
+      <h2>📺 Select Type</h2>
+      <p>How should the content be organized?</p>
+      <div class="modal-grid">
+        <button class="btn btn-secondary focusable" id="btn-wizard-single" tabindex="0">
+          <div style="font-size:1.1rem; font-weight:700;">🎥 Single Series</div>
+          <div style="font-size:0.8rem; opacity:0.7;">Organize as Seasons & Episodes</div>
+        </button>
+        <button class="btn btn-secondary focusable" id="btn-wizard-multi" tabindex="0">
+          <div style="font-size:1.1rem; font-weight:700;">📺 Multiple Series</div>
+          <div style="font-size:0.8rem; opacity:0.7;">Each sub-group is a different show</div>
+        </button>
+        <button class="btn btn-secondary focusable" onclick="goToAddStep('confirm')" tabindex="0" style="margin-top:20px; opacity:0.6;">Back</button>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -331,10 +393,42 @@
 
 <!-- ── Zoom Menu Modal ────────────────────────────────── -->
 <div id="zoom-modal" class="modal-overlay">
-  <div class="modal-box" style="width: 340px; text-align:center; padding: 24px;">
-    <h2 style="margin-bottom: 20px;">Interface Zoom</h2>
-    <div id="zoom-list" class="scrollable" style="display:flex; flex-direction:column; gap:8px; max-height:60vh; margin-bottom: 20px;"></div>
-    <button class="btn btn-secondary focusable" onclick="closeModal('zoom-modal')" tabindex="0" style="width:100%;">Close</button>
+  <div class="modal-box">
+    <h2>🔍 Interface Zoom</h2>
+    <p>Adjust the overall scale of the interface to fit your TV screen.</p>
+    <div id="zoom-list" class="modal-grid"></div>
+  </div>
+</div>
+
+<!-- ── Countdown Menu Modal ────────────────────────────── -->
+<div id="countdown-modal" class="modal-overlay">
+  <div class="modal-box">
+    <h2>⏳ Countdown</h2>
+    <p>Select how many seconds to wait before auto-playing the next episode.</p>
+    <div id="countdown-list" class="modal-grid"></div>
+  </div>
+</div>
+
+<!-- ── Seek Interval Menu Modal ────────────────────────── -->
+<div id="seek-step-modal" class="modal-overlay">
+  <div class="modal-box">
+    <h2>⏩ Seek Interval</h2>
+    <p>Choose the skip interval for remote control rewind/forward buttons.</p>
+    <div id="seek-step-list" class="modal-grid"></div>
+  </div>
+</div>
+
+<!-- ── Source Options Modal ────────────────────────────── -->
+<div id="source-options-modal" class="modal-overlay">
+  <div class="modal-box">
+    <h2 id="opts-source-name">Source Options</h2>
+    <p id="opts-source-link" style="margin-bottom:20px; font-size:0.9rem; opacity:0.7;"></p>
+    <div class="modal-grid">
+      <button class="btn btn-secondary focusable" id="btn-opts-refresh" tabindex="0">🔄 Refresh content</button>
+      <button class="btn btn-secondary focusable" id="btn-opts-rename"  tabindex="0">✏️ Rename source</button>
+      <button class="btn btn-danger focusable"    id="btn-opts-delete"  tabindex="0">🗑️ Delete source</button>
+      <button class="btn btn-secondary focusable" id="btn-opts-cancel"  tabindex="0" style="margin-top:20px;">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -354,12 +448,16 @@ let currentEpisode = null;
 let lastFocusedSeriesId = null;
 let lastFocusedSeasonId = null;
 let lastFocusedEpisodeId = null;
+let lastActiveElement = null; // Used to restore focus after modal/sidebar closes
 let currentSettings = { auto_next_enabled: 1, auto_next_countdown: 15, seek_step: 15 };
+let wizardPendingData = { name: '', link: '', isSingle: true, photo: null };
+let wizardStepHistory = [];
 let autoNextActive = false;
 let autoNextTimer = null;
 let progressDebounce = null;
 let indexPollInterval = null;
 let userId = null;
+let lastFocusedSourceId = null;
 let shareQrGenerated = false;
 let shareSseSource = null;
 let controlsHideTimer = null;
@@ -396,15 +494,28 @@ function showConfirm(msg, title = 'Confirm', isDanger = false) {
   });
 }
 
-function openModal(id) { 
+function openModal(id) {
+  lastActiveElement = document.activeElement; // Track where we came from
   document.getElementById(id).classList.add('open'); 
   document.getElementById('app').inert = true;
 }
 function closeModal(id) { 
   document.getElementById(id).classList.remove('open'); 
-  // Only remove inert if no other modals are open
+  
+  // 1. CLEAR INERT FIRST - Important for TV focus restoration
   if (!document.querySelector('.modal-overlay.open')) {
     document.getElementById('app').inert = false;
+  }
+
+  // 2. NOW RESTORE FOCUS
+  if (lastActiveElement && document.contains(lastActiveElement)) {
+    console.log('[Modal] Restoring focus to:', lastActiveElement.id || lastActiveElement.tagName);
+    lastActiveElement.focus();
+    lastActiveElement = null;
+  } else {
+    // Fallback focus if previous element is gone or not found
+    const activeTab = document.querySelector('#tab-bar .tab-item.active');
+    if (activeTab) activeTab.focus();
   }
 }
 
@@ -455,16 +566,23 @@ function showTab(view) {
 
 function handleBack() {
   // Check open modals first
-  const modals = ['add-source-modal','assign-modal','share-modal','confirm-modal'];
-  for (const m of modals) {
-    if (document.getElementById(m).classList.contains('open')) {
-      closeModal(m);
-      return;
+  const openOverlay = document.querySelector('.modal-overlay.open');
+  if (openOverlay) {
+    if (openOverlay.id === 'add-source-modal' && wizardStepHistory.length > 1) {
+        wizardStepHistory.pop(); // Remove current screen
+        const prevStep = wizardStepHistory[wizardStepHistory.length - 1];
+        // Note: we don't call goToAddStep(prevStep) directly if it re-pushes, 
+        // but our new logic in goToAddStep handles truncation correctly.
+        goToAddStep(prevStep);
+        return;
     }
+    closeModal(openOverlay.id);
+    return;
   }
-  // Update Overlay
+
+  // Check Updater
   const updatePopup = document.getElementById('update-overlay-popup');
-  if (updatePopup && window.AppUpdater) {
+  if (updatePopup && window.AppUpdater && window.getComputedStyle(updatePopup).display !== 'none') {
     window.AppUpdater.dismissDialog();
     return;
   }
@@ -478,10 +596,24 @@ function handleBack() {
     if (catalogView === 'episodes') { loadSeasons(currentSeries); return; }
     if (catalogView === 'seasons')  { loadCatalogSeries(); return; }
   }
-  
+
+  // Sources navigation flow
+  if (currentView === 'sources') {
+    const active = document.activeElement;
+    if (active && active.classList.contains('source-card')) {
+      document.getElementById('add-source-btn').focus();
+      return;
+    }
+    if (active && active.id === 'add-source-btn') {
+      const activeTab = document.querySelector('#tab-bar .tab-item.active');
+      if (activeTab) activeTab.focus();
+      return;
+    }
+  }
+
   // If at root (no more breadcrumbs), check if we should focus sidebar or exit
   const activeZone = document.activeElement.closest('[data-nav-zone]')?.getAttribute('data-nav-zone');
-  if (activeZone !== 'tabs' && activeZone !== 'notif') {
+  if (activeZone === 'content') {
     const activeTab = document.querySelector('#tab-bar .tab-item.active');
     if (activeTab) {
       activeTab.focus();
@@ -1010,71 +1142,192 @@ async function toggleFav(type, id, currentState) {
 
 // ── Sources ────────────────────────────────────────────────────────────────
 
-let pendingSourceName = '';
-let pendingSourceLink = '';
-
 document.getElementById('add-source-btn').onclick = () => {
-  // Clear inputs and open modal directly
-  document.getElementById('source-name-input').value = '';
-  document.getElementById('source-link-input').value = '';
+  goToAddStep('start');
   openModal('add-source-modal');
-  setTimeout(() => document.getElementById('source-name-input').focus(), 50);
 };
 
-document.getElementById('btn-single-series').onclick = () => {
-  pendingSourceName = document.getElementById('source-name-input').value.trim();
-  let rawLink = document.getElementById('source-link-input').value.trim();
-  if (!rawLink) { showToast('Channel link is required', 'error'); return; }
-  if (rawLink.startsWith('http://') || rawLink.startsWith('https://')) {
-    pendingSourceLink = rawLink;
-  } else {
-    if (rawLink.startsWith('/')) rawLink = rawLink.substring(1);
-    pendingSourceLink = 'https://t.me/' + rawLink;
+function goToAddStep(step) {
+  // Clear existing errors UNLESS we are coming back to the link step
+  const err = document.getElementById('wizard-link-error');
+  if (err && step !== 'link') err.style.display = 'none';
+
+  const steps = document.querySelectorAll('.wizard-step');
+  steps.forEach(s => s.classList.remove('active'));
+  
+  const target = document.getElementById(`add-step-${step}`);
+  if (target) {
+    target.classList.add('active');
+    
+    // Stack-based history logic:
+    // If the step is already in the stack, trim the stack to that step (Linear Stack)
+    // If it's a new step (and not a transition state), push it.
+    if (step !== 'loading') {
+        const existingIdx = wizardStepHistory.indexOf(step);
+        if (existingIdx !== -1) {
+            wizardStepHistory = wizardStepHistory.slice(0, existingIdx + 1);
+        } else {
+            wizardStepHistory.push(step);
+        }
+    }
+    // Auto focus first button or input
+    setTimeout(() => {
+        const first = target.querySelector('.focusable');
+        if (first) first.focus();
+    }, 100);
   }
-  submitSource(true);
-};
 
-document.getElementById('btn-multi-series').onclick = () => {
-  pendingSourceName = document.getElementById('source-name-input').value.trim();
-  let rawLink = document.getElementById('source-link-input').value.trim();
-  if (!rawLink) { showToast('Channel link is required', 'error'); return; }
-  if (rawLink.startsWith('http://') || rawLink.startsWith('https://')) {
-    pendingSourceLink = rawLink;
-  } else {
-    if (rawLink.startsWith('/')) rawLink = rawLink.substring(1);
-    pendingSourceLink = 'https://t.me/' + rawLink;
+  // Handle QR session
+  if (step === 'qr') {
+    startWizardQrSession();
+  } else if (step !== 'start') {
+    // If we leave QR step, stop the server
+    stopWizardQrSession();
   }
-  submitSource(false);
+}
+
+async function startWizardQrSession() {
+  const container = document.getElementById('wizard-qr-container');
+  container.innerHTML = '';
+  
+  const token = Math.random().toString(36).substring(2, 10);
+  const localIp = (window.AndroidBridge && window.AndroidBridge.getLocalIpAddress) 
+    ? window.AndroidBridge.getLocalIpAddress() 
+    : window.location.hostname;
+  
+  const shareUrl = `http://${localIp}:9991/share.html?token=${token}`;
+  
+  new QRCode(container, {
+    text: shareUrl, width: 220, height: 220,
+    colorDark: '#000000', colorLight: '#ffffff'
+  });
+
+  document.getElementById('wizard-qr-link-text').textContent = shareUrl;
+
+  if (window.Capacitor && window.Capacitor.Plugins.StreamPlayer) {
+    const { StreamPlayer } = window.Capacitor.Plugins;
+    await StreamPlayer.startShareServer({ token });
+
+    // Remove old listener if exists
+    if (window.activeShareListener) window.activeShareListener.remove();
+
+    window.activeShareListener = await StreamPlayer.addListener('link_shared', (data) => {
+      console.log('[Wizard] Shared link received:', data.link);
+      document.getElementById('wizard-link-input').value = data.link;
+      stopWizardQrSession();
+      goToAddStep('link'); // Auto proceed to link validation
+      validateStepLink();
+    });
+  }
+}
+
+function stopWizardQrSession() {
+  if (window.Capacitor && window.Capacitor.Plugins.StreamPlayer) {
+    window.Capacitor.Plugins.StreamPlayer.stopShareServer();
+    if (window.activeShareListener) {
+      window.activeShareListener.remove();
+      window.activeShareListener = null;
+    }
+  }
+}
+
+
+async function validateStepLink() {
+  const input = document.getElementById('wizard-link-input');
+  let raw = input.value.trim();
+  if (!raw) { showToast('Link is required', 'error'); return; }
+  
+  let link = raw;
+  if (!raw.startsWith('http')) {
+    if (raw.startsWith('/')) raw = raw.substring(1);
+    link = 'https://t.me/' + raw;
+  }
+  
+  wizardPendingData.link = link;
+  goToAddStep('loading');
+  
+  try {
+    const { channelArg } = await window.TGClient.resolveChannelFromLink(link);
+    const entity = await window.TGClient.getEntity(channelArg);
+    wizardPendingData.name = entity.title || entity.username || 'Telegram Channel';
+    
+    // Attempt photo download
+    wizardPendingData.photo = await window.TGClient.downloadProfilePhoto(entity);
+    
+    document.getElementById('fetched-name-display').textContent = wizardPendingData.name;
+    const avatarCont = document.getElementById('confirm-source-avatar-container');
+    if (wizardPendingData.photo) {
+        avatarCont.innerHTML = `<img src="${wizardPendingData.photo}" style="width:100px; height:100px; border-radius:50%; border:3px solid var(--accent); object-fit: cover;">`;
+    } else {
+        avatarCont.innerHTML = `<div class="card-avatar-placeholder" style="width:100px; height:100px; font-size:2.5rem;">📡</div>`;
+    }
+    
+    goToAddStep('confirm');
+  } catch(e) {
+    console.error('[Wizard] Validation failed:', e);
+    const err = document.getElementById('wizard-link-error');
+    if (err) {
+        err.textContent = '❌ Could not find channel. Check the link and try again.';
+        err.style.display = 'block';
+    }
+    goToAddStep('link');
+  }
+}
+
+document.getElementById('btn-next-link').onclick = validateStepLink;
+
+document.getElementById('btn-confirm-yes').onclick = () => {
+    goToAddStep('type');
 };
 
-document.getElementById('cancel-source-modal').onclick = () => closeModal('add-source-modal');
+document.getElementById('btn-confirm-edit').onclick = () => {
+    document.getElementById('wizard-name-input').value = wizardPendingData.name;
+    goToAddStep('rename');
+};
 
-async function submitSource(isSingleSeries) {
+document.getElementById('btn-save-rename').onclick = () => {
+    const newName = document.getElementById('wizard-name-input').value.trim();
+    if (!newName) { showToast('Name is required', 'error'); return; }
+    wizardPendingData.name = newName;
+    goToAddStep('type');
+}
+
+document.getElementById('btn-wizard-single').onclick = () => {
+    wizardPendingData.isSingle = true;
+    submitWizardSource();
+};
+
+document.getElementById('btn-wizard-multi').onclick = () => {
+    wizardPendingData.isSingle = false;
+    submitWizardSource();
+};
+
+async function submitWizardSource() {
   closeModal('add-source-modal');
   const btn = document.getElementById('add-source-btn');
+  const oldText = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Adding...';
+  
   try {
-    let name = pendingSourceName;
-    if (!name) {
-      const { channelArg } = await window.TGClient.resolveChannelFromLink(pendingSourceLink);
-      const entity = await window.TGClient.getEntity(channelArg);
-      name = entity.title || entity.username || 'Telegram Channel';
-    }
-    const id = await window.DB.addSource(name, pendingSourceLink, isSingleSeries, userId);
+    const id = await window.DB.addSource(wizardPendingData.name, wizardPendingData.link, wizardPendingData.isSingle, userId);
     const source = await window.DB.getSourceById(id);
     window.AppIndexer.indexSource(source);
     await window.TGClient.syncSourcesToTelegram(userId);
-    document.getElementById('source-name-input').value = '';
-    document.getElementById('source-link-input').value = '';
+    
     await loadSources();
     startIndexPoll(true);
     showToast('Source added and indexing started!', 'success');
+    
+    // Clear inputs for next time
+    document.getElementById('wizard-link-input').value = '';
+    document.getElementById('wizard-name-input').value = '';
   } catch(e) {
     showToast(e.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Add Source';
+    btn.textContent = oldText;
+    wizardStepHistory = [];
   }
 }
 
@@ -1104,16 +1357,75 @@ async function loadSources() {
           <div class="source-name">${s.name}</div>
           <div class="source-link">${s.link}</div>
           <span class="status-badge ${st.status}" id="badge-${s.id}" style="margin-top:6px;display:inline-flex;">${badgeIcon} ${badgeLabel}</span>
-        </div>
-        <div class="source-card-actions">
-          <button class="source-action-btn sync focusable" tabindex="0"
-            title="Refresh" onclick="event.stopPropagation();refreshSource(${s.id})">🔄</button>
-          <button class="source-action-btn danger focusable" tabindex="0"
-            title="Delete" onclick="event.stopPropagation();deleteSource(${s.id})">🗑️</button>
         </div>`;
+      card.onclick = () => openSourceOptions(s);
+      
+      // Handle navigation override for jumping to Add Source button
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowUp') {
+            const prev = card.previousElementSibling;
+            if (prev && prev.classList.contains('source-card')) {
+                e.stopImmediatePropagation();
+                e.preventDefault();
+                prev.focus();
+                prev.scrollIntoView({ block: 'nearest' });
+            }
+        }
+      });
+
       list.appendChild(card);
     });
+
+    // Restore focus memory
+    if (lastFocusedSourceId) {
+        const target = document.getElementById(`source-row-${lastFocusedSourceId}`);
+        if (target) {
+            target.focus();
+            target.scrollIntoView({ block: 'nearest' });
+        }
+    }
   } catch(e) { console.error(e); }
+}
+
+function openSourceOptions(source) {
+  lastFocusedSourceId = source.id;
+  document.getElementById('opts-source-name').textContent = source.name;
+  document.getElementById('opts-source-link').textContent = source.link;
+  
+  const refreshBtn = document.getElementById('btn-opts-refresh');
+  const renameBtn  = document.getElementById('btn-opts-rename');
+  const deleteBtn  = document.getElementById('btn-opts-delete');
+  const cancelBtn  = document.getElementById('btn-opts-cancel');
+
+  refreshBtn.onclick = () => { closeModal('source-options-modal'); refreshSource(source.id); };
+  renameBtn.onclick  = () => { openModal('add-source-modal'); promptRenameWizard(source); };
+  deleteBtn.onclick  = () => { closeModal('source-options-modal'); deleteSource(source.id); };
+  cancelBtn.onclick  = () => { closeModal('source-options-modal'); };
+
+  openModal('source-options-modal');
+  refreshBtn.focus();
+}
+
+async function promptRenameWizard(source) {
+    wizardPendingData = { id: source.id, name: source.name, link: source.link, isSingle: source.is_single_series };
+    document.getElementById('wizard-name-input').value = source.name;
+    
+    // Override the save button for rename mode
+    const saveBtn = document.getElementById('btn-save-rename');
+    const originalOnclick = saveBtn.onclick;
+    
+    saveBtn.onclick = async () => {
+        const newName = document.getElementById('wizard-name-input').value.trim();
+        if (!newName) { showToast('Name is required', 'error'); return; }
+        await window.DB.db.sources.update(source.id, { name: newName });
+        closeModal('add-source-modal');
+        loadSources();
+        showToast('Source renamed', 'success');
+        saveBtn.onclick = originalOnclick; // Restore
+        wizardStepHistory = [];
+    };
+    
+    goToAddStep('rename');
 }
 
 async function refreshSource(id) {
@@ -1210,60 +1522,143 @@ async function loadSettings() {
     const chk = document.getElementById('setting-auto-next');
     chk.checked = (s.auto_next_enabled === 1);
     
-    // Grey out logic
-    const cdRow = document.getElementById('countdown-row-wrapper');
-    const cn = document.getElementById('setting-countdown');
-    cn.value = s.auto_next_countdown;
-    
-    if (chk.checked) {
-      cdRow.style.opacity = '1'; cdRow.style.pointerEvents = 'auto'; cn.tabIndex = 0;
-    } else {
-      cdRow.style.opacity = '0.4'; cdRow.style.pointerEvents = 'none'; cn.tabIndex = -1;
-    }
-
     // Load Zoom
     const zoom = s.ui_zoom ? parseInt(s.ui_zoom) : 100;
     document.documentElement.style.fontSize = (18 * (zoom / 100)) + 'px';
     const zoomEl = document.getElementById('zoom-val');
-    zoomEl.dataset.zoom = zoom;
-    zoomEl.textContent = zoom + '%';
+    if (zoomEl) {
+      zoomEl.dataset.zoom = zoom;
+      zoomEl.textContent = zoom + '%';
+    }
+
+    // Load Countdown
+    if (s.auto_next_countdown) {
+      const cdEl = document.getElementById('countdown-val');
+      if (cdEl) {
+        cdEl.dataset.value = s.auto_next_countdown;
+        cdEl.textContent = s.auto_next_countdown + 's';
+      }
+    }
 
     // Load Seek Step
     if (s.seek_step) {
-      document.getElementById('setting-seek-step').value = s.seek_step;
+      const stepEl = document.getElementById('seek-step-display');
+      if (stepEl) {
+        stepEl.textContent = s.seek_step + 's';
+        stepEl.dataset.value = s.seek_step;
+      }
       document.getElementById('btn-rewind').textContent = `⏪ -${s.seek_step}s`;
       document.getElementById('btn-forward').textContent = `+${s.seek_step}s ⏩`;
+    }
+
+    // Toggle Countdown Row state
+    const cdRow = document.getElementById('countdown-row-wrapper');
+    if (cdRow) {
+      if (s.auto_next_enabled === 1) {
+        cdRow.style.opacity = '1';
+        cdRow.style.pointerEvents = 'auto';
+        cdRow.classList.remove('disabled');
+      } else {
+        cdRow.style.opacity = '0.4';
+        cdRow.style.pointerEvents = 'none';
+        cdRow.classList.add('disabled');
+      }
     }
   } catch(e) {}
 }
 
+function openCountdownModal() {
+  const container = document.getElementById('countdown-list');
+  container.innerHTML = '';
+  const current = parseInt(document.getElementById('countdown-val').dataset.value) || 15;
+  const options = [1, 3, 5, 10, 15, 20, 30];
+  
+  options.forEach(val => {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-secondary focusable';
+    if (val === current) {
+      btn.style.borderColor = 'var(--accent)';
+      btn.style.color = 'var(--accent)';
+    }
+    btn.textContent = val + ' seconds';
+    btn.tabIndex = 0;
+    btn.onclick = () => {
+      const el = document.getElementById('countdown-val');
+      el.dataset.value = val;
+      el.textContent = val + 's';
+      autoSaveSettings();
+      closeModal('countdown-modal');
+    };
+    container.appendChild(btn);
+  });
+  openModal('countdown-modal');
+  container.querySelector('button').focus();
+}
+
+function openSeekStepModal() {
+  const container = document.getElementById('seek-step-list');
+  container.innerHTML = '';
+  const current = parseInt(document.getElementById('seek-step-display').dataset.value) || 15;
+  const options = [5, 10, 15, 30, 60];
+  
+  options.forEach(val => {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-secondary focusable';
+    if (val === current) {
+      btn.style.borderColor = 'var(--accent)';
+      btn.style.color = 'var(--accent)';
+    }
+    btn.textContent = val + ' seconds';
+    btn.tabIndex = 0;
+    btn.onclick = () => {
+      const el = document.getElementById('seek-step-display');
+      el.dataset.value = val;
+      el.textContent = val + 's';
+      autoSaveSettings();
+      closeModal('seek-step-modal');
+    };
+    container.appendChild(btn);
+  });
+  openModal('seek-step-modal');
+  container.querySelector('button').focus();
+}
+
+function cycleSeekStep() {
+  // Deprecated - using modal now
+  openSeekStepModal();
+}
+
 async function autoSaveSettings() {
   const chk = document.getElementById('setting-auto-next').checked;
-  const cn = document.getElementById('setting-countdown');
   const cdRow = document.getElementById('countdown-row-wrapper');
   
   // Grey out logic
   if (chk) {
     cdRow.style.opacity = '1';
     cdRow.style.pointerEvents = 'auto';
-    cn.tabIndex = 0;
+    cdRow.classList.remove('disabled');
   } else {
     cdRow.style.opacity = '0.4';
     cdRow.style.pointerEvents = 'none';
-    cn.tabIndex = -1;
+    cdRow.classList.add('disabled');
   }
   
   const autoNext = chk ? 1 : 0;
-  const countdown = parseInt(cn.value) || 15;
-  const uiZoom = parseInt(document.getElementById('zoom-val').dataset.zoom) || 100;
-  const seekStep = parseInt(document.getElementById('setting-seek-step').value) || 15;
+  const cdValEl = document.getElementById('countdown-val');
+  const countdown = cdValEl ? (parseInt(cdValEl.dataset.value) || 15) : 15;
+  const zoomValEl = document.getElementById('zoom-val');
+  const uiZoom = zoomValEl ? (parseInt(zoomValEl.dataset.zoom) || 100) : 100;
+  const seekStepEl = document.getElementById('seek-step-display');
+  const seekStep = seekStepEl ? (parseInt(seekStepEl.dataset.value) || 15) : 15;
 
   await window.DB.updateUserSettings(userId, autoNext, countdown, uiZoom, seekStep);
   currentSettings = { auto_next_enabled: autoNext, auto_next_countdown: countdown, ui_zoom: uiZoom, seek_step: seekStep };
   
   // Update player buttons
-  document.getElementById('btn-rewind').textContent = `⏪ -${seekStep}s`;
-  document.getElementById('btn-forward').textContent = `+${seekStep}s ⏩`;
+  const rwdBtn = document.getElementById('btn-rewind');
+  const fwdBtn = document.getElementById('btn-forward');
+  if (rwdBtn) rwdBtn.textContent = `⏪ -${seekStep}s`;
+  if (fwdBtn) fwdBtn.textContent = `+${seekStep}s ⏩`;
 }
 
 function openZoomModal() {
@@ -1331,8 +1726,8 @@ async function handleLogout() {
 // Handle setting row clicks for D-pad toggling
 document.querySelectorAll('.settings-row').forEach(row => {
   row.addEventListener('click', (e) => {
-    // Prevent double-click if button itself was clicked (not applicable to the label but good practice)
-    if (e.target.tagName === 'INPUT' || row.id === 'zoom-row') return;
+    // Prevent double-click if button itself was clicked or complex row
+    if (e.target.tagName === 'INPUT' || row.id === 'zoom-row' || row.id === 'setting-seek-step-row' || row.id === 'countdown-row-wrapper') return;
     const input = row.querySelector('input[type="checkbox"]');
     if (input) {
       input.checked = !input.checked;
@@ -1688,79 +2083,6 @@ async function playNextEpisode() {
 }
 
 // ── Share from Phone ───────────────────────────────────────────────────────
-
-document.getElementById('share-phone-btn').onclick = async () => {
-  openModal('share-modal');
-  
-  // Create a session-specific token
-  const token = Math.random().toString(36).substring(2, 10);
-  const localIp = (window.AndroidBridge && window.AndroidBridge.getLocalIpAddress) 
-    ? window.AndroidBridge.getLocalIpAddress() 
-    : window.location.hostname;
-  
-  // Native Server runs on 9991
-  const shareUrl = `http://${localIp}:9991/share.html?token=${token}`;
-  
-  // Clear and regenerate QR
-  const container = document.getElementById('share-qr-container');
-  container.innerHTML = '';
-  new QRCode(container, {
-    text: shareUrl, width: 180, height: 180,
-    colorDark: '#000000', colorLight: '#ffffff'
-  });
-
-  // Add visible URL text for manual entry or verification
-  let urlHint = document.getElementById('share-url-hint');
-  if (!urlHint) {
-    urlHint = document.createElement('div');
-    urlHint.id = 'share-url-hint';
-    urlHint.style.marginTop = '15px';
-    urlHint.style.fontSize = '0.9rem';
-    urlHint.style.color = '#38bdf8';
-    urlHint.style.wordBreak = 'break-all';
-    container.parentNode.appendChild(urlHint);
-  }
-  urlHint.innerText = shareUrl;
-
-  // Add Wi-Fi Warning if not exists
-  let wifiWarning = document.getElementById('wifi-warning');
-  if (!wifiWarning) {
-    wifiWarning = document.createElement('div');
-    wifiWarning.id = 'wifi-warning';
-    wifiWarning.style.marginTop = '10px';
-    wifiWarning.style.color = '#fbbf24';
-    wifiWarning.style.fontSize = '0.85rem';
-    wifiWarning.innerHTML = '⚠️ וודא שהטלפון והטלוויזיה מחוברים ל<b>אותו Wi-Fi</b>.<br>(אל תשתמש ב-4G/5G בטלפון)';
-    container.parentNode.appendChild(wifiWarning);
-  }
-
-  // Start the temporary server in Java
-  if (window.Capacitor && window.Capacitor.Plugins.StreamPlayer) {
-    const { StreamPlayer } = window.Capacitor.Plugins;
-    await StreamPlayer.startShareServer({ token });
-
-    // One-time listener for the link
-    const listener = await StreamPlayer.addListener('link_shared', (data) => {
-      console.log('[Streaming] Shared link received:', data.link);
-      document.getElementById('source-link-input').value = data.link;
-      
-      // Cleanup
-      closeModal('share-modal');
-      listener.remove();
-      StreamPlayer.stopShareServer();
-      
-      document.getElementById('source-name-input').focus();
-    });
-  }
-};
-
-document.getElementById('close-share-modal').onclick = () => {
-  closeModal('share-modal');
-  if (window.Capacitor && window.Capacitor.Plugins.StreamPlayer) {
-    window.Capacitor.Plugins.StreamPlayer.stopShareServer();
-  }
-};
-
 // ── Sync on startup ────────────────────────────────────────────────────────
 
 async function syncFromTelegram() {
@@ -1775,6 +2097,7 @@ async function syncFromTelegram() {
     }
   } catch(e) { console.error('[Startup sync]', e); }
 }
+
 
 async function startApp() {
   const sessionStr = localStorage.getItem('tg_session');

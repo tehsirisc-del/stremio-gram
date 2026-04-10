@@ -197,7 +197,7 @@ const SpatialNav = (() => {
 
     if (best) {
       best.focus();
-      best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
+      best.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
   }
 

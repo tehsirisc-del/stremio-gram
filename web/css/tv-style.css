@@ -72,7 +72,7 @@ html, body {
   background: rgba(15, 23, 42, 0.85);
   border-right: 1px solid rgba(255,255,255,0.06);
   flex-shrink: 0;
-  overflow: hidden;
+  overflow: visible; /* Prevent focus outline clipping */
   transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 200;
   justify-content: flex-start;
@@ -129,7 +129,7 @@ html, body {
   border-radius: 0;
   border-left: 3px solid transparent;
   white-space: nowrap;
-  overflow: hidden;
+  overflow: visible; /* Allow focus outline to breathe */
   flex-shrink: 0;
   position: relative;
 }
@@ -185,9 +185,9 @@ html, body {
 
 /* ── Update Pill inside Sidebar ── */
 #top-notif-container {
-  padding: 0 12px 12px 12px;
+  padding: 8px 12px 12px 12px;
   width: 100%;
-  overflow: hidden;
+  overflow: visible; /* Prevent focus outline clipping */
 }
 
 .tab-item-update {
@@ -204,7 +204,7 @@ html, body {
   transition: all 0.2s ease;
   width: 100%;
   white-space: nowrap;
-  overflow: hidden;
+  overflow: visible; /* Allow focus outline to breathe */
 }
 
 .tab-item-update:focus, 
@@ -218,8 +218,9 @@ html, body {
 #content-area {
   flex: 1;
   height: 100vh;
-  overflow-y: auto; /* Only this section scrolls */
+  overflow-y: auto;
   overflow-x: hidden;
+  scroll-behavior: smooth; /* Enforce smooth vertical scroll */
   display: flex;
   flex-direction: column;
   min-width: 0; 
@@ -587,36 +588,16 @@ body.very-fast-nav .card.focused {
 }
 
 /* ── Source List ──────────────────────────────────────────────────── */
-.source-row {
-  background: var(--bg-surface);
-  padding: 18px 20px;
-  border-radius: 12px;
-  margin-bottom: 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border: 2px solid transparent;
-  gap: 16px;
-}
 
-.source-row:focus,
-.source-row.focused {
-  border-color: var(--accent);
-}
-
-.source-info .source-name { font-weight: 700; font-size: 1.1rem; }
-.source-info .source-link { font-size: 0.82rem; color: var(--text-secondary); }
-.source-row-actions { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
 
 /* ── Scrollable source area ───────────────────────────────────────── */
-.scrollable {
+.scrollable, .sources-page, #source-list {
   overflow-y: auto;
   overflow-x: hidden;
+  scroll-behavior: smooth !important; /* Force for Sources screen */
   flex: 1;
   padding: 16px;
   margin: 0;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255,255,255,0.1) transparent;
 }
 
 /* ── Video Player Modal ───────────────────────────────────────────── */
@@ -736,45 +717,98 @@ body.very-fast-nav .card.focused {
 
 /* ── Modal Overlay ────────────────────────────────────────────────── */
 .modal-overlay {
-  display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.72);
-  z-index: 500;
-  justify-content: center;
-  align-items: center;
-  padding: 48px;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(8px);
+  z-index: 2000;
+  display: flex !important;
+  justify-content: flex-end;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  /* Sync: visibility stays visible until opacity/child-transform finishes */
+  transition: opacity 0.4s ease, visibility 0s 0.4s;
 }
 
-.modal-overlay.open { display: flex; }
+.modal-overlay.open {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.4s ease, visibility 0s;
+}
 
 .modal-box {
-  background: var(--bg-surface);
-  border-radius: 16px;
-  padding: 32px;
-  max-width: 480px;
-  width: 100%;
-  border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+  background: #0f172a;
+  width: 420px; 
+  height: 100vh;
+  padding: 24px 0; /* Increased padding for focus safe-zone */
+  box-shadow: -20px 0 80px rgba(0,0,0,0.95);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%) scale(0.98);
+  opacity: 0;
+  will-change: transform, opacity;
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease;
+  border-left: 1px solid rgba(255,255,255,0.1);
+}
+
+.modal-overlay.open .modal-box {
+  transform: translateX(0) scale(1);
+  opacity: 1;
 }
 
 .modal-box h2 {
-  font-size: 1.5rem;
-  margin-bottom: 12px;
+  font-size: 2rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+  color: white;
+  padding: 0 32px; /* Reduced side padding */
 }
 
 .modal-box p {
-  font-size: 0.95rem;
+  font-size: 1.1rem;
   color: var(--text-secondary);
-  margin-bottom: 24px;
+  margin-bottom: 40px;
   line-height: 1.5;
+  padding: 0 32px;
+}
+
+.modal-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px; 
+  flex: 1;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  padding: 10px 32px; /* Reduced side padding to fill space */
+}
+
+.modal-grid::-webkit-scrollbar { display: none; }
+
+/* Modern Panel Button Styles - Unified Glowing Focus */
+.modal-grid .btn {
+  text-align: left;
+  padding: 20px 24px;
+  background: rgba(255,255,255,0.04);
+  border: 2px solid transparent;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  outline: none !important; /* NO DOUBLE OUTLINE */
+}
+
+.modal-grid .btn:focus {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: #38bdf8;
+  transform: scale(1.02);
+  outline: none !important;
 }
 
 .modal-btns {
   display: flex;
-  gap: 14px;
-  justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 32px;
 }
 
 /* ── QR Code ──────────────────────────────────────────────────────── */
@@ -849,6 +883,7 @@ body.very-fast-nav .card.focused {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 4px; /* Buffer for focus rings */
 }
 
 .settings-section-title {
@@ -885,8 +920,9 @@ body.very-fast-nav .card.focused {
 .settings-row.focused {
   background: rgba(59,130,246,0.12);
   border-color: var(--accent) !important;
-  outline: none;
+  outline: none !important; /* NO DOUBLE OUTLINE */
   z-index: 100;
+  transform: scale(1.02);
 }
 
 .settings-label { flex: 1; }
@@ -924,6 +960,7 @@ body.very-fast-nav .card.focused {
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
+  padding-top: 12px; /* Prevent focus outline clipping */
 }
 
 .sources-header h2 {
@@ -950,8 +987,11 @@ body.very-fast-nav .card.focused {
 .source-add-btn:focus,
 .source-add-btn.focused {
   background: var(--accent-hover);
-  outline: none;
+  outline: 3px solid white;
+  outline-offset: 4px;
   z-index: 100;
+  transform: scale(1.05);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
 }
 
 .sources-list {
@@ -1002,48 +1042,7 @@ body.very-fast-nav .card.focused {
 .source-card-info .source-name { font-weight: 700; font-size: 1.05rem; color: white; }
 .source-card-info .source-link { font-size: 0.82rem; color: var(--text-secondary); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.source-card-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-shrink: 0;
-}
 
-.source-action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  border: 1.5px solid rgba(255,255,255,0.1);
-  background: rgba(255,255,255,0.05);
-  color: var(--text-secondary);
-  font-size: 1.1rem;
-  cursor: pointer;
-  transition: all 0.15s;
-  flex-shrink: 0;
-}
-
-.source-action-btn:focus,
-.source-action-btn.focused {
-  outline: none;
-  z-index: 100;
-}
-
-.source-action-btn.danger:focus,
-.source-action-btn.danger.focused {
-  background: rgba(239,68,68,0.2);
-  border-color: var(--danger);
-  color: var(--danger);
-}
-
-.source-action-btn.sync:focus,
-.source-action-btn.sync.focused {
-  background: rgba(59,130,246,0.2);
-  border-color: var(--accent);
-  color: var(--accent);
-}
 
 /* ── Add Source Modal (TV Optimized) ──────────────────────────────── */
 .add-source-form {
@@ -1059,29 +1058,57 @@ body.very-fast-nav .card.focused {
 }
 
 .add-source-form label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.source-row {
-  background: var(--bg-surface);
-  padding: 18px 20px;
-  border-radius: 12px;
-  margin-bottom: 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border: 2px solid transparent;
-  gap: 16px;
+/* ── Wizard Transitions ────────────────────────────────────────── */
+.wizard-step {
+  display: none;
+  animation: wizard-fade 0.3s ease;
 }
 
-.source-row:focus,
-.source-row.focused {
-  border-color: var(--accent);
+.wizard-step.active {
+  display: block;
 }
+
+@keyframes wizard-fade {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.wizard-step h2 {
+  font-size: 1.8rem;
+  margin-bottom: 8px;
+  color: white;
+}
+
+.wizard-step p {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  margin-bottom: 24px;
+}
+
+.wizard-step.active.center-align {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.wizard-error {
+  background: rgba(244, 63, 94, 0.1);
+  color: #fb7185;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  margin-top: -10px;
+  margin-bottom: 20px;
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  display: none;
+}
+
+
+
 /* ── Card Progress Bar (Indexing) ── */
 .card-progress-container {
   position: absolute;
