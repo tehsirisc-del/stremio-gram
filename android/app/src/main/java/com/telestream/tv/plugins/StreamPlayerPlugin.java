@@ -304,18 +304,22 @@ public class StreamPlayerPlugin extends Plugin {
 
         // ── Hardware & Sync Fixes ───────────────────────────────────────────────
         DefaultRenderersFactory renderersFactory = new DefaultRenderersFactory(getContext())
-                .setEnableDecoderFallback(true); // Robustness: Allow software fallback to prevent black screens on hardware failure
+                .setEnableDecoderFallback(true) // Robustness: Allow software fallback
+                .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON); // Prefer extensions if available
 
         DefaultTrackSelector trackSelector = new DefaultTrackSelector(getContext());
-        // Disabling Tunneling to prevent hardware sync hangs on resume/seek for non-4K content
-        trackSelector.setParameters(trackSelector.buildUponParameters().setTunnelingEnabled(false));
+        // Explicitly disable tunneling and ensure we allow video joining without perfect headers
+        trackSelector.setParameters(trackSelector.buildUponParameters()
+            .setTunnelingEnabled(false)
+            .setExceedRendererCapabilitiesIfNecessary(true)
+        );
 
         // ── ExoPlayer ───────────────────────────────────────────────────────────
         player = new ExoPlayer.Builder(getContext())
                 .setRenderersFactory(renderersFactory)
                 .setTrackSelector(trackSelector)
                 .setLoadControl(loadControl)
-                .setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC) // Snap to keyframes for robust resuming
+                .setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
                 .setSeekForwardIncrementMs(seekStepMs)
                 .setSeekBackIncrementMs(seekStepMs)
                 .build();
@@ -326,7 +330,24 @@ public class StreamPlayerPlugin extends Plugin {
         player.addListener(new androidx.media3.common.Player.Listener() {
             @Override
             public void onPlayerError(androidx.media3.common.PlaybackException error) {
-                updateNativeDebug("PLAYER_ERROR: " + error.getMessage() + " (" + error.getErrorCodeName() + ")");
+                Log.e(TAG, "[TELESTREAM_DEBUG] Player Error: " + error.getMessage() + " Code: " + error.errorCode);
+                
+                // Auto-Recovery for MKV/Resume "Black Screen" crash (Decoding Failed)
+                if (error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_DECODING_FAILED ||
+                    error.errorCode == androidx.media3.common.PlaybackException.ERROR_CODE_DECODER_INIT_FAILED) {
+                    
+                    Log.w(TAG, "[TELESTREAM_DEBUG] Decoding failure detected. Attempting auto-recovery seek...");
+                    long currentPos = player.getCurrentPosition();
+                    player.prepare();
+                    // Nudge back 1s to re-sync decoder
+                    player.seekTo(Math.max(0, currentPos - 1000));
+                    player.play();
+                    return;
+                }
+                
+                JSObject ret = new JSObject();
+                ret.put("error", error.getMessage());
+                emitEvent("player_error", ret);
                 Log.e(TAG, "ExoPlayer Error: " + error.getMessage(), error);
             }
 
@@ -474,23 +495,11 @@ public class StreamPlayerPlugin extends Plugin {
         MediaSource mediaSource = new ProgressiveMediaSource.Factory(dataSourceFactory)
                 .createMediaSource(MediaItem.fromUri(currentBridgeDataSource.getUri()));
 
-        player.setMediaSource(mediaSource, seekTo); // Media3 hint
+        // We use setMediaSource with the start position directly.
+        // Secondary seek logic is removed as it often causes decoder hangups on hardware decoders.
+        player.setMediaSource(mediaSource, seekTo); 
         player.prepare();
-        
-        // Robust Seek Backup: Some sources ignore the startPosition in setMediaSource.
-        // We track it and re-apply when the player reports STATE_READY.
-        this.pendingSeekTo = seekTo;
-        
-        player.addListener(new androidx.media3.common.Player.Listener() {
-            @Override
-            public void onPlaybackStateChanged(int playbackState) {
-                if (playbackState == androidx.media3.common.Player.STATE_READY && pendingSeekTo > 0) {
-                    Log.d(TAG, "[TELESTREAM_DEBUG] STATE_READY: Applying pending seek to " + pendingSeekTo + "ms");
-                    player.seekTo(pendingSeekTo);
-                    pendingSeekTo = 0; // Clear so it doesn't seek again on buffer/pause
-                }
-            }
-        });
+        player.play();
         
         player.setPlayWhenReady(true);
 
