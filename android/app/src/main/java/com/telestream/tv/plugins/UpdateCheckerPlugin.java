@@ -174,20 +174,27 @@ public class UpdateCheckerPlugin extends Plugin {
                 finishData.put("progress", 100);
                 notifyListeners("download_progress", finishData);
 
-                // Install APK
-                Uri apkUri = FileProvider.getUriForFile(
-                        getContext(),
-                        getContext().getPackageName() + ".fileprovider",
-                        outputFile
-                );
+                // Install APK - Trigger on Main Thread for improved reliability
+                mainHandler.post(() -> {
+                    try {
+                        Log.d(TAG, "Download complete. Triggering system installer.");
+                        Uri apkUri = FileProvider.getUriForFile(
+                                getContext(),
+                                getContext().getPackageName() + ".fileprovider",
+                                outputFile
+                        );
 
-                Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                getContext().startActivity(intent);
-
-                mainHandler.post(() -> call.resolve());
+                        Intent intent = new Intent(Intent.ACTION_VIEW);
+                        intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        getContext().startActivity(intent);
+                        call.resolve();
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to start install activity", e);
+                        call.reject("INSTALL_ERROR", e.getMessage());
+                    }
+                });
 
             } catch (Exception e) {
                 Log.e(TAG, "Download error", e);

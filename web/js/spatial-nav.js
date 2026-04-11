@@ -32,6 +32,8 @@ const SpatialNav = (() => {
 
   let lastNavTime = 0;
   const NAV_THROTTLE = 85;
+  let startupLock = true;
+  setTimeout(() => { startupLock = false; }, 1000);
 
   // ── Key Handler ────────────────────────────────────────────────────────────
   function handleKey(e) {
@@ -40,6 +42,13 @@ const SpatialNav = (() => {
       return;
     }
     const key = e.key;
+    
+    // Ignore Enter/Ok during startup lock to prevent launcher "bleed" clicks
+    if (startupLock && ['Enter', ' ', 'Select', 'Ok', 'Center', 'dpad_center'].includes(key)) {
+        console.log('[SpatialNav] Ignoring Enter/Ok during startup lock');
+        e.preventDefault();
+        return;
+    }
     const active = document.activeElement;
     const isInput = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT');
 
