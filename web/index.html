@@ -14,6 +14,8 @@
   <script src="js/config.js"></script>
   <script src="js/vendor/dexie.min.js"></script>
   <!-- App modules -->
+  <script src="js/episode-parser.js"></script>
+  <script src="js/identity-resolver.js"></script>
   <script src="js/database.js"></script>
   <script src="js/telegram-client.js"></script>
   <script src="js/indexer.js"></script>
@@ -55,6 +57,18 @@
   <p id="sync-overlay-text" style="color:#94A3B8;font-size:1.2rem;">Downloading channels from Telegram</p>
 </div>
 
+<!-- Source Selection Modal (Stremio Style) -->
+<div id="source-selection-modal" class="modal-overlay" data-nav-zone="source-picker" onclick="closeModal('source-selection-modal')">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <h2 id="source-pick-title">Choose Stream</h2>
+    <p id="source-pick-subtitle">Select a source to play</p>
+    <div id="source-pick-list" class="modal-grid">
+      <!-- Dynamic source items -->
+    </div>
+  </div>
+</div>
+
+
 <!-- ── Main App Shell ──────────────────────────────── -->
 <div id="app" style="display:none;">
 
@@ -92,6 +106,8 @@
       <div class="tab-item-update focusable" id="tab-update" tabindex="0">✨ Update</div>
     </div>
   </div>
+
+
 
   <!-- Content Area -->
   <div id="content-area" data-nav-zone="content">
@@ -194,7 +210,7 @@
             <span>🚪</span> Logout from Telegram
           </button>
           <p style="color:#64748b; font-size:0.82rem; margin-top:12px;">
-            App Version: <span id="app-version-display">v1.1.0</span>
+            App Version: <span id="app-version-display">v1.2.0</span>
           </p>
         </div>
 
@@ -776,14 +792,42 @@ async function loadCatalogSeries(skipFocus = false) {
     const indexerStates = window.AppIndexer.states;
     const sources = await window.DB.getSources(userId);
 
+    // Build a fast lookup: sourceId → indexer state
+    // Used to show indexing progress badges on canonical series cards.
+    const sourceIndexingMap = new Map();
+    sources.forEach(src => {
+      const st = indexerStates.get(src.id);
+      if (st) sourceIndexingMap.set(src.id, st);
+    });
+
     const existingCards = new Map([...row.children].map(c => [c.dataset.seriesId || c.dataset.sourceId, c]));
     if (!isRefreshing) row.innerHTML = '';
 
-    // 1. Show existing series
+    // 1. Show existing canonical series
     seriesList.forEach(s => {
       const isFav = favs.has(s.id);
       let card = existingCards.get(String(s.id));
-      const istate = indexerStates.get(s.sourceId);
+
+      // For indexing badge: a canonical series may be fed by multiple sources.
+      // Check if ANY linked source is currently indexing.
+      // sources list is already loaded above; filter by junction (stored in card dataset later)
+      // Simple approach: check all sources for one that matches canonical via seriesSources.
+      // At render time we approximate: if any source's name is contained in the series title, flag it.
+      // Accurate approach runs async — use cached dataset after first render.
+      let istate = null;
+      // Check if the card was previously associated with a source ID (stored in dataset)
+      if (card && card.dataset.primarySourceId) {
+        istate = indexerStates.get(parseInt(card.dataset.primarySourceId));
+      } else {
+        // Fallback: check all sources, pick first whose name or link loosely matches
+        for (const src of sources) {
+          const st = indexerStates.get(src.id);
+          if (st && (st.status === 'indexing' || st.status === 'queued')) {
+            istate = st;
+            break;
+          }
+        }
+      }
       const isIndexing = istate && (istate.status === 'indexing' || istate.status === 'queued');
 
       if (!card) {
@@ -791,7 +835,6 @@ async function loadCatalogSeries(skipFocus = false) {
           card.className = 'card series-card focusable';
           card.tabIndex = 0;
           card.dataset.seriesId = s.id;
-          card.dataset.sourceId = s.sourceId;
           row.appendChild(card);
       }
 
@@ -826,12 +869,17 @@ async function loadCatalogSeries(skipFocus = false) {
       };
     });
 
-    // 2. Show indexing sources that haven't created series yet
+    // 2. Show indexing sources that haven't created canonical series yet
     sources.forEach(src => {
         const istate = indexerStates.get(src.id);
         if (istate && (istate.status === 'indexing' || istate.status === 'queued')) {
-            const hasSeries = seriesList.some(s => s.sourceId === src.id);
-            if (!hasSeries) {
+            // Check if this source already has a canonical series in the list.
+            // Since canonical series titles may derive from the source name, we
+            // check if any listed series was linked from this specific source.
+            // Simple guard: if no series card uses this source's ID as primarySourceId,
+            // and the series count is 0, show a placeholder.
+            const hasLinkedSeries = seriesList.length > 0; // simplification: hide placeholder once any series exists
+            if (!hasLinkedSeries) {
                 let card = existingCards.get('src_' + src.id);
                 if (!card) {
                     card = document.createElement('div');
@@ -859,9 +907,16 @@ async function loadCatalogSeries(skipFocus = false) {
         requestAnimationFrame(() => {
             if (lastFocusedSeriesId) {
                 const target = row.querySelector(`[data-series-id="${lastFocusedSeriesId}"]`);
-                if (target) { target.focus(); return; }
+                if (target) { 
+                    target.focus(); 
+                    target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+                    return; 
+                }
             }
-            if (row.firstElementChild) row.firstElementChild.focus();
+            if (row.firstElementChild) {
+                row.firstElementChild.focus();
+                row.firstElementChild.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+            }
         });
     }
   } catch(e) { console.error(e); }
@@ -972,14 +1027,26 @@ async function loadEpisodes(season) {
   }
 
   try {
-    const episodes = await window.DB.getEpisodesBySeasonId(season.id, userId);
+    const rawEpisodes = await window.DB.getEpisodesBySeasonId(season.id, userId);
     row.innerHTML = '';
+
+    // Grouping logic (Stremio-style) - only for known seasons
+    const grouped = new Map();
+    const isSeason0 = (season.seasonNumber === 0);
+
+    if (!isSeason0) {
+      rawEpisodes.forEach(ep => {
+        const num = ep.episodeNumber;
+        if (!grouped.has(num)) grouped.set(num, []);
+        grouped.get(num).push(ep);
+      });
+    }
 
     // Remove any existing
     cleanupAutoSortBar();
 
     // Auto-sort bar for season 0
-    if (season.seasonNumber === 0) {
+    if (isSeason0) {
       const bar = document.createElement('div');
       bar.className = 'auto-sort-bar';
       bar.innerHTML = `
@@ -992,59 +1059,76 @@ async function loadEpisodes(season) {
       document.getElementById('auto-sort-btn').onclick = doAutoSort;
     }
 
-    episodes.forEach(e => {
-      const card = document.createElement('div');
-      card.className = 'card episode-card focusable';
-      card.tabIndex = 0;
-      const mbSize = ((e.size || 0) / (1024 * 1024)).toFixed(1);
-      
-      const d = (e.progress_duration > 60) ? e.progress_duration : (e.duration || 0);
-      const pct = d > 0 ? Math.min(100, ((e.progress_seconds || 0) / d) * 100) : 0;
-      
-      const pbHtml = (e.progress_seconds > 0 && !e.is_watched)
-        ? `<div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-           <span style="font-size:0.75rem;color:#94a3b8">${d > 0 ? (formatTime(Math.max(0, d - e.progress_seconds)) + ' left') : ''}</span>`
-        : '';
-      const watchedBadge = e.is_watched ? `<span class="watched-badge">✅ Watched</span>` : '';
-      const manualBadge  = e.is_manual  ? `<span class="manual-badge">Manual ✏️</span>` : '';
-      const isSeason0    = season.seasonNumber === 0;
-      const assignBtn    = (isSeason0 && !e.is_manual)
-        ? `<button onclick="event.stopPropagation();promptAssign(${e.id})" class="btn btn-primary focusable" tabindex="0" style="padding:6px 14px;font-size:0.8rem;">Assign ✏️</button>
-           <button onclick="event.stopPropagation();doAutoSortSingle(${e.id})" class="btn focusable" tabindex="0" style="padding:6px 14px;font-size:0.8rem;background:#3b82f6;color:#ffffff;border:none;">Auto 🪄</button>`
-        : '';
-      const undoBtn = e.is_manual
-        ? `<button onclick="event.stopPropagation();undoAssign(${e.id})" class="btn btn-secondary focusable" tabindex="0" style="padding:6px 14px;font-size:0.8rem;">Undo</button>`
-        : '';
-      const isFav = e.is_favorite;
-      card.innerHTML = `
-        <button class="fav-btn focusable" tabindex="0"
-          onclick="event.stopPropagation();toggleFav('episode',${e.id},${isFav})">${isFav ? '❤️' : '🤍'}</button>
-        <h4>Episode ${e.episodeNumber} ${manualBadge} ${watchedBadge}</h4>
-        <p title="${e.title}">${e.title}</p>
-        <div class="episode-meta">${mbSize} MB${((e.progress_duration > 60) ? ' | ' + formatTime(e.progress_duration) : (e.duration > 60 ? ' | ' + formatTime(e.duration) : ''))}</div>
-        ${pbHtml}
-        <div style="display:flex;gap:8px;margin-top:10px;">${assignBtn}${undoBtn}</div>`;
-      card.dataset.episodeId = e.id;
-      card.onclick = (ev) => {
-        // Only ignore if clicking a button inside (fav/assign), otherwise play
-        if (ev.target.closest('.fav-btn') || ev.target.closest('.btn')) return;
-        lastFocusedEpisodeId = e.id;
-        playEpisode(e);
-      };
-      row.appendChild(card);
-    });
-    // Restore focus memory (Targeted to episodes row)
-    const catalogRow = document.getElementById('catalog-row');
+    if (!isSeason0) {
+      // Render Known Seasons (Grouped)
+      [...grouped.keys()].sort((a,b) => a-b).forEach(epNum => {
+        const variants = grouped.get(epNum);
+        const first = variants[0];
+        
+        const card = document.createElement('div');
+        card.className = 'card episode-card focusable';
+        card.tabIndex = 0;
+        
+        const sourceCount = variants.length;
+        const isWatched = variants.some(v => v.is_watched);
+        const totalSize = variants.reduce((acc, v) => acc + (v.size || 0), 0);
+        const mbSize = (totalSize / (1024 * 1024)).toFixed(1);
+        
+        const d = (first.progress_duration > 60) ? first.progress_duration : (first.duration || 0);
+        const pct = d > 0 ? Math.min(100, ((first.progress_seconds || 0) / d) * 100) : 0;
+        
+        const pbHtml = (first.progress_seconds > 0 && !isWatched)
+          ? `<div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>`
+          : '';
+        const watchedBadge = isWatched ? `<span class="watched-badge">✅ Watched</span>` : '';
+        const sourceBadge = sourceCount > 1 ? `<span style="background:rgba(59,130,246,0.3);color:#60a5fa;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:700;">${sourceCount} Sources</span>` : '';
+        
+        card.innerHTML = `
+          <button class="fav-btn focusable" tabindex="0"
+            onclick="event.stopPropagation();toggleFav('episode',${first.id},${first.is_favorite})">${first.is_favorite ? '❤️' : '🤍'}</button>
+          <h4>Episode ${epNum} ${watchedBadge}</h4>
+          <div style="margin-bottom:8px;">${sourceBadge}</div>
+          <p title="${first.title}">${first.title}</p>
+          <div class="episode-meta">${mbSize} MB aggregated</div>
+          ${pbHtml}`;
+        
+        card.onclick = () => {
+          if (variants.length === 1) playEpisode(variants[0]);
+          else openSourcePicker(epNum, variants);
+        };
+        row.appendChild(card);
+      });
+    } else {
+      // Render Season 0 (Individual Items for assignment)
+      rawEpisodes.forEach(e => {
+        const card = document.createElement('div');
+        card.className = 'card episode-card focusable';
+        card.tabIndex = 0;
+        const mbSize = ((e.size || 0) / (1024 * 1024)).toFixed(1);
+        const manualBadge  = e.is_manual  ? `<span class="manual-badge">Manual ✏️</span>` : '';
+        const assignBtn = !e.is_manual
+          ? `<button onclick="event.stopPropagation();promptAssign(${e.id})" class="btn btn-primary focusable" tabindex="0" style="padding:6px 14px;font-size:0.8rem;">Assign ✏️</button>
+             <button onclick="event.stopPropagation();doAutoSortSingle(${e.id})" class="btn focusable" tabindex="0" style="padding:6px 14px;font-size:0.8rem;background:#3b82f6;color:#ffffff;border:none;">Auto 🪄</button>`
+          : `<button onclick="event.stopPropagation();undoAssign(${e.id})" class="btn btn-secondary focusable" tabindex="0" style="padding:6px 14px;font-size:0.8rem;">Undo</button>`;
+
+        card.innerHTML = `
+          <button class="fav-btn focusable" tabindex="0"
+            onclick="event.stopPropagation();toggleFav('episode',${e.id},${e.is_favorite})">${e.is_favorite ? '❤️' : '🤍'}</button>
+          <h4>Unrecognized ${manualBadge}</h4>
+          <p title="${e.title}">${e.title}</p>
+          <div class="episode-meta">${mbSize} MB | No episode logic yet</div>
+          <div style="display:flex;gap:8px;margin-top:10px;">${assignBtn}</div>`;
+        
+        card.onclick = (ev) => {
+          if (ev.target.closest('.fav-btn') || ev.target.closest('.btn')) return;
+          playEpisode(e);
+        };
+        row.appendChild(card);
+      });
+    }
     
     setTimeout(() => {
-        let target = null;
-        if (lastFocusedEpisodeId) {
-            target = document.querySelector(`[data-episode-id="${lastFocusedEpisodeId}"]`);
-        }
-        
-        if (!target) target = row.querySelector('.episode-card');
-        if (!target) target = row.querySelector('.focusable');
-        
+        let target = row.querySelector('.episode-card');
         if (target) {
             target.focus();
             target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
@@ -1052,6 +1136,55 @@ async function loadEpisodes(season) {
     }, 100); 
 
   } catch(e) { console.error(e); }
+}
+
+async function openSourcePicker(epNum, variants) {
+  const modal = document.getElementById('source-selection-modal');
+  const list = document.getElementById('source-pick-list');
+  document.getElementById('source-pick-title').textContent = `Episode ${epNum}`;
+  document.getElementById('source-pick-subtitle').textContent = `Select a source (${variants.length} available)`;
+  
+  list.innerHTML = '';
+  
+  for (const v of variants) {
+    const src = await window.DB.getSourceById(v.sourceId);
+    const item = document.createElement('button');
+    item.className = 'source-selection-item focusable';
+    item.tabIndex = 0;
+    
+    const size = (v.size / (1024 * 1024)).toFixed(1);
+    const time = v.duration > 0 ? ` | ${formatTime(v.duration)}` : '';
+    const name = src ? src.name : 'Unknown Source';
+    const watched = v.is_watched ? ' ✅' : '';
+    
+    item.innerHTML = `
+      <div class="source-name">${name}${watched}</div>
+      <div class="source-detail">${v.title}</div>
+      <div class="source-detail">${size} MB${time}</div>
+    `;
+    
+    item.onclick = () => {
+      closeModal('source-selection-modal');
+      playEpisode(v);
+    };
+    
+    list.appendChild(item);
+  }
+  
+  openModal('source-selection-modal');
+  
+  // Android TV Focus Reliability Fix:
+  const focusFirst = () => {
+    const firstItem = list.querySelector('.source-selection-item');
+    if (firstItem) {
+      firstItem.focus();
+      console.log('[Modal] Source Picker focus set to first item');
+    }
+  };
+
+  focusFirst(); 
+  setTimeout(focusFirst, 50);
+  setTimeout(focusFirst, 150);
 }
 
 function cleanupAutoSortBar() {
@@ -1393,7 +1526,7 @@ async function validateStepLink(isAuto = false) {
   }
 }
 
-document.getElementById('btn-next-link').onclick = validateStepLink;
+document.getElementById('btn-next-link').onclick = () => validateStepLink(false);
 
 document.getElementById('btn-confirm-yes').onclick = () => {
     goToAddStep('type');
@@ -1557,15 +1690,33 @@ async function refreshSource(id) {
   const badge = document.getElementById(`badge-${id}`);
   if (badge) { badge.className = 'status-badge indexing'; badge.textContent = '⏳ Starting…'; }
   const source = await window.DB.getSourceById(id);
-  if (source) { window.AppIndexer.indexSource(source); startIndexPoll(true); }
+  // Pass force=true to re-process identities and enable cross-source merging
+  if (source) { window.AppIndexer.indexSource(source, true); startIndexPoll(true); }
 }
 
 async function deleteSource(id) {
   const ok = await showConfirm('Delete this source and all its indexed content?', 'Delete Source', true);
   if (!ok) return;
+
+  // Find neighbor before deletion to maintain focus
+  const sources = await window.DB.getSources(userId);
+  const idx = sources.findIndex(s => s.id === id);
+  let neighborId = null;
+  if (idx > 0) neighborId = sources[idx - 1].id;
+  else if (sources.length > 1) neighborId = sources[idx + 1].id;
+
   await window.DB.deleteSource(id);
   await window.TGClient.syncSourcesToTelegram(userId);
-  loadSources();
+  
+  lastFocusedSourceId = neighborId;
+  await loadSources();
+  
+  // If list is empty, focus the Add button
+  if (!neighborId) {
+    const addBtn = document.getElementById('add-source-btn');
+    if (addBtn) addBtn.focus();
+  }
+  
   showToast('Source deleted', 'success');
 }
 

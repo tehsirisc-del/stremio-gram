@@ -224,6 +224,7 @@ html, body {
   display: flex;
   flex-direction: column;
   min-width: 0; 
+  padding: 4px 0; /* Reduced from 20px (80% reduction) */
 }
 
 .view { 
@@ -232,7 +233,7 @@ html, body {
   height: max-content; 
   min-height: 100%; 
   overflow: visible; 
-  padding: 28px 0; /* No horizontal padding at view level */
+  padding: 6px 0; /* Reduced from 28px (80% reduction) */
 }
 .view.active { display: flex; }
 
@@ -296,8 +297,8 @@ html, body {
   display: flex;
   overflow-x: auto;
   overflow-y: visible;
-  padding: 40px 24px 40px 24px; /* Left gap 24px, enough right gap to not stick */
-  margin: -40px 0; 
+  padding: 50px 32px 50px 32px; /* Increased buffer for 1.05x scale ring */
+  margin: -50px 0; 
   scroll-snap-type: x mandatory;
   scroll-padding: 0 24px;
   scrollbar-width: none;
@@ -307,6 +308,12 @@ html, body {
   padding-bottom: 20px;
   margin-bottom: -20px;
   contain: layout style;
+}
+
+.row-container::after {
+  content: "";
+  display: block;
+  flex: 0 0 40px; /* Larger spacer for rightmost card focus ring */
 }
 
 body.fast-nav .row-container {
@@ -590,14 +597,39 @@ body.very-fast-nav .card.focused {
 /* ── Source List ──────────────────────────────────────────────────── */
 
 
-/* ── Scrollable source area ───────────────────────────────────────── */
-.scrollable, .sources-page, #source-list {
-  overflow-y: auto;
-  overflow-x: hidden;
-  scroll-behavior: smooth !important; /* Force for Sources screen */
-  flex: 1;
-  padding: 16px;
-  margin: 0;
+/* ── Source Selection List Items ───────────────────────────────────── */
+.source-selection-item {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  text-align: left !important;
+  width: 100% !important;
+  background: rgba(255,255,255,0.05) !important;
+  border: 2px solid transparent !important;
+  padding: 16px 20px !important;
+  border-radius: 12px !important;
+  margin-bottom: 12px !important;
+  transition: all 0.2s ease !important;
+}
+
+.source-selection-item:focus,
+.source-selection-item.focused {
+  background: rgba(59, 130, 246, 0.15) !important;
+  border-color: var(--accent) !important;
+  transform: scale(1.02) !important;
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3) !important;
+}
+
+.source-selection-item .source-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: white;
+  margin-bottom: 4px;
+}
+
+.source-selection-item .source-detail {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
 
 /* ── Video Player Modal ───────────────────────────────────────────── */

@@ -203,7 +203,8 @@ const SpatialNav = (() => {
 
     if (best) {
       best.focus();
-      best.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      // Ensure the card is centered horizontally to prevent scaling clipping at the screen edges.
+      best.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
     }
   }
 
